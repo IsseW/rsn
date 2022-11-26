@@ -1,4 +1,4 @@
-#![feature(array_try_map, iterator_try_collect, let_chains, iter_collect_into)]
+#![feature(array_try_map, iterator_try_collect, iter_collect_into)]
 
 mod from_value;
 mod parse;

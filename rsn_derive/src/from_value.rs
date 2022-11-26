@@ -93,7 +93,16 @@ fn named_help(fields: &syn::FieldsNamed, path: String) -> String {
     for field in fields.named.iter() {
         let attrs = FieldAttrs::from(&field.attrs);
         if !attrs.skip {
-            let _ = write!(msg, "\n\t{}: <value>,", field.ident.as_ref().unwrap());
+            if attrs.default {
+                write!(
+                    msg,
+                    "\n\t{}: <value>, <optional>",
+                    field.ident.as_ref().unwrap()
+                )
+                .unwrap();
+            } else {
+                write!(msg, "\n\t{}: <value>,", field.ident.as_ref().unwrap()).unwrap();
+            }
         }
     }
     let _ = write!(msg, "\n}}");
@@ -118,9 +127,8 @@ fn unnamed_help(fields: &syn::FieldsUnnamed, path: String) -> String {
 
 fn fields_named(
     fields: &syn::FieldsNamed,
-    check_path: TokenStream,
+    check_path: Option<TokenStream>,
     self_repr: TokenStream,
-    untagged: bool,
 ) -> TokenStream {
     let error = quote!(__from_value::FromValueErrorKind);
 
@@ -188,69 +196,65 @@ fn fields_named(
         }
     };
 
-    let struct_repr = if untagged && max_fields > 0 {
+    let fields_default = fields.named.iter().map(|field| {
+        let ident = field.ident.as_ref().unwrap();
         quote!(
-            __from_value::ValueKind::Struct(mut fields) => {
-                #field_parse
-            }
+            #ident: core::default::Default::default()
         )
-    } else {
-        quote!()
-    };
+    });
+    let all_default = quote!(
+        Ok(Self {
+            #(#fields_default),*
+        })
+    );
 
-    let named_struct_repr = if max_fields > 0 {
-        quote!(
+    if let Some(check_path) = check_path {
+        let named_struct_repr = quote!(
             __from_value::ValueKind::NamedStruct(path, mut fields) #check_path => {
                 #field_parse
             }
+        );
+        let unit_repr = if min_fields == 0 {
+            quote!(
+                __from_value::ValueKind::Path(path) #check_path => {
+                    #all_default
+                }
+            )
+        } else {
+            quote!()
+        };
+
+        quote!(
+            #named_struct_repr
+            #unit_repr
         )
     } else {
-        quote!()
-    };
-
-    let unit_repr = if min_fields == 0 {
-        let field_iter = fields.named.iter().map(|field| {
-            let ident = field.ident.as_ref().unwrap();
-            quote!(
-                #ident: core::default::Default::default()
-            )
-        });
-        let all_default = quote!(
-            Ok(Self {
-                #(#field_iter),*
-            })
-        );
-        let unit = quote!(
-            __from_value::ValueKind::Path(path) #check_path => {
-                #all_default
+        let struct_repr = quote!(
+            __from_value::ValueKind::Struct(mut fields) => {
+                #field_parse
             }
         );
-        if untagged {
+
+        let unit_repr = if min_fields == 0 {
             quote!(
                 __from_value::ValueKind::Map(fields) if fields.len() == 0 => {
                     #all_default
                 }
-                #unit
             )
         } else {
-            unit
-        }
-    } else {
-        quote!()
-    };
-
-    quote!(
-        #struct_repr
-        #named_struct_repr
-        #unit_repr
-    )
+            quote!()
+        };
+        quote!(
+            #struct_repr
+            #unit_repr
+        )
+    }
 }
 
 fn fields_unnamed(
     fields: &syn::FieldsUnnamed,
-    check_path: TokenStream,
+    check_path: Option<TokenStream>,
     self_repr: TokenStream,
-    untagged: bool,
 ) -> TokenStream {
     let error = quote!(__from_value::FromValueErrorKind);
 
@@ -286,46 +290,46 @@ fn fields_unnamed(
         }
     );
 
-    let tuple_repr = if untagged {
-        if num_fields == 1 {
+    if let Some(check_path) = check_path {
+        if num_fields == 0 {
             quote!(
-                value => {
-                    let mut iter = core::iter::once(__from_value::Spanned::new(span, value));
+                __from_value::ValueKind::Path(path) #check_path => {
                     #parse_fields
+                }
+                __from_value::ValueKind::NamedTuple(path, mut fields) #check_path => {
+                    #parse_fields2
                 }
             )
         } else {
             quote!(
-                __from_value::ValueKind::Tuple(mut fields) => {
+                __from_value::ValueKind::NamedTuple(path, mut fields) #check_path => {
                     #parse_fields2
                 }
             )
         }
     } else {
-        quote!()
-    };
-
-    let named_tuple_repr = quote!(
-        __from_value::ValueKind::NamedTuple(path, mut fields) #check_path => {
-            #parse_fields2
+        match num_fields {
+            0 => quote!(
+                __from_value::ValueKind::Tuple(fields) if fields.len() == 0 => {
+                    #parse_fields
+                }
+            ),
+            1 => quote!(
+                value => {
+                    let mut iter = core::iter::once(__from_value::Spanned::new(span, value));
+                    #parse_fields
+                }
+                __from_value::ValueKind::Tuple(mut fields) => {
+                    #parse_fields2
+                }
+            ),
+            _ => quote!(
+                __from_value::ValueKind::Tuple(mut fields) => {
+                    #parse_fields2
+                }
+            ),
         }
-    );
-
-    let unit_repr = if num_fields == 0 {
-        quote!(
-            __from_value::ValueKind::Path(path) #check_path => {
-                #parse_fields
-            }
-        )
-    } else {
-        quote!()
-    };
-
-    quote!(
-        #named_tuple_repr
-        #unit_repr
-        #tuple_repr
-    )
+    }
 }
 
 pub fn from_value(input: &DeriveInput) -> TokenStream {
@@ -338,12 +342,14 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
 
     let parse = match &input.data {
         syn::Data::Struct(data) => {
-            let check_path = quote!(
-                if path.is_struct(std::concat!(std::module_path!(), "::", #ident_str))
-            );
+            let check_path = (!attrs.untagged).then(|| {
+                quote!(
+                    if path.is_struct(std::concat!(std::module_path!(), "::", #ident_str))
+                )
+            });
             match &data.fields {
                 syn::Fields::Named(fields) => {
-                    let reprs = fields_named(fields, check_path, quote!(Self), attrs.untagged);
+                    let reprs = fields_named(fields, check_path, quote!(Self));
                     let help_msg = named_help(fields, ident_str);
 
                     quote!(
@@ -354,7 +360,7 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                     )
                 }
                 syn::Fields::Unnamed(fields) => {
-                    let reprs = fields_unnamed(fields, check_path, quote!(Self), attrs.untagged);
+                    let reprs = fields_unnamed(fields, check_path, quote!(Self));
                     let help_msg = unnamed_help(fields, ident_str);
                     quote!(
                         match value.inner() {
@@ -377,21 +383,35 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
             let field_cases = data.variants.iter().map(|variant| {
                 let variant_attrs = ContainerAttrs::from(&variant.attrs);
                 let variant_ident = &variant.ident;
-                let variant_str = variant_ident.to_string();
+                let variant_str = variant_attrs.rename.map_or(variant_ident.to_string(), |ident| ident.to_string());
                 let untagged = attrs.untagged;
-                let check_path = quote!(
-                    if path.is_enum::<#untagged>(std::concat!(std::module_path!(), "::", #ident_str, "::", #variant_str))
-                );
+                let check_path = if variant_attrs.untagged && attrs.untagged {
+                    None
+                } else if variant_attrs.untagged {
+                    Some(quote!(
+                        if path.is_enum::<#untagged>(std::concat!(std::module_path!(), "::", #ident_str))
+                    ))
+                } else {
+                    Some(quote!(
+                        if path.is_enum::<#untagged>(std::concat!(std::module_path!(), "::", #ident_str, "::", #variant_str))
+                    ))
+                };
+
                 match &variant.fields {
                     syn::Fields::Named(fields) => {
-                        fields_named(fields, check_path, quote!(Self::#variant_ident), variant_attrs.untagged)
+                        fields_named(fields, check_path, quote!(Self::#variant_ident))
                     }
                     syn::Fields::Unnamed(fields) => {
-                        fields_unnamed(fields, check_path, quote!(Self::#variant_ident), variant_attrs.untagged)
+                        fields_unnamed(fields, check_path, quote!(Self::#variant_ident))
                     }
-                    syn::Fields::Unit => quote!(
+                    syn::Fields::Unit => if let Some(check_path) = check_path {
+                        quote!(
                         __from_value::ValueKind::Path(path) #check_path => Ok(Self::#variant_ident),
-                    ),
+                    ) } else {
+                        quote!(
+                            __from_value::ValueKind::Tuple(fields) if fields.len() == 0 => Ok(Self::#variant_ident),
+                        )
+                    }
                 }
             });
             let help_msgs = data.variants.iter().fold(quote!(), |acc, variant| {

@@ -4,6 +4,8 @@ use crate::{parse::Chars, ParseError, Position, Span, Spanned};
 
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
+pub type Fields<'a> = Map<Spanned<&'a str>, Value<'a>>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Path<'a> {
     pub leading: bool,
@@ -137,8 +139,8 @@ pub enum ValueKind<'a> {
 
     Tuple(Vec<Value<'a>>),
     NamedTuple(Spanned<Path<'a>>, Vec<Value<'a>>),
-    Struct(Map<Spanned<&'a str>, Value<'a>>),
-    NamedStruct(Spanned<Path<'a>>, Map<Spanned<&'a str>, Value<'a>>),
+    Struct(Fields<'a>),
+    NamedStruct(Spanned<Path<'a>>, Fields<'a>),
 }
 
 impl<'a> PartialEq for ValueKind<'a> {

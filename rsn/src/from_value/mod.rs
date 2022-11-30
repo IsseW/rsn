@@ -67,25 +67,24 @@ pub trait FromValue: Sized {
     fn from_value(value: Value) -> Result<Self, FromValueError>;
 }
 
-impl FromValue for i64 {
-    fn from_value(value: Value) -> Result<Self, FromValueError> {
-        match *value {
-            ValueKind::Integer(i) => Ok(i),
-            _ => Err(FromValueError {
-                span: value.span,
-                value: Error::ExpectedType("i64"),
-            }),
-        }
-    }
-}
-
 macro_rules! int_from_value {
     ($($ty:ty),*$(,)?) => {
         $(
         impl FromValue for $ty {
             fn from_value(value: Value) -> Result<Self, FromValueError> {
                 let span = value.span;
-                i64::from_value(value).and_then(|i| i.try_into().map_err(|_| FromValueError::new(span, Error::ExpectedType(stringify!($ty)))))
+                match value.inner() {
+                    ValueKind::Integer(i) => Ok(i.try_into().map_err(|_| FromValueError {
+                        span,
+                        value: Error::ExpectedType(stringify!($ty)),
+                    })?),
+                    ValueKind::Path(path) if path.is_ident("MIN") => Ok(<$ty>::MIN),
+                    ValueKind::Path(path) if path.is_ident("MAX") => Ok(<$ty>::MAX),
+                    _ => Err(FromValueError {
+                        span,
+                        value: Error::ExpectedType(stringify!($ty)),
+                    }),
+                }
             }
         }
         )*
@@ -96,38 +95,39 @@ int_from_value! {
     i8,
     i16,
     i32,
+    i64,
+    isize,
     u8,
     u16,
     u32,
     u64,
+    usize,
 }
 
-impl FromValue for f64 {
-    fn from_value(value: Value) -> Result<Self, FromValueError> {
-        match &*value {
-            ValueKind::Float(f) => Ok(*f),
-            ValueKind::Integer(i) => Ok(*i as f64),
-            ValueKind::Path(path) if path.is_ident("INFINITY") => Ok(f64::INFINITY),
-            ValueKind::Path(path) if path.is_ident("NEG_INFINITY") => Ok(f64::NEG_INFINITY),
-            ValueKind::Path(path) if path.is_ident("NAN") => Ok(f64::NAN),
-            _ => Err(FromValueError {
-                span: value.span,
-                value: Error::ExpectedType("f64"),
-            }),
+macro_rules! float_from_value {
+    ($($ty:ty),*$(,)?) => {
+        $(
+        impl FromValue for $ty {
+            fn from_value(value: Value) -> Result<Self, FromValueError> {
+                let span = value.span;
+                match value.inner() {
+                    ValueKind::Float(f) => Ok(f as $ty),
+                    ValueKind::Integer(i) => Ok(i as $ty),
+                    ValueKind::Path(path) if path.is_ident("INFINITY") => Ok(<$ty>::INFINITY),
+                    ValueKind::Path(path) if path.is_ident("NEG_INFINITY") => Ok(<$ty>::NEG_INFINITY),
+                    ValueKind::Path(path) if path.is_ident("NAN") => Ok(<$ty>::NAN),
+                    _ => Err(FromValueError {
+                        span,
+                        value: Error::ExpectedType("f64"),
+                    }),
+                }
+            }
         }
-    }
+        )*
+    };
 }
 
-impl FromValue for f32 {
-    fn from_value(value: Value) -> Result<Self, FromValueError> {
-        f64::from_value(value)
-            .map(|f| f as f32)
-            .map_err(|err| FromValueError {
-                value: Error::ExpectedType("f32"),
-                ..err
-            })
-    }
-}
+float_from_value!(f32, f64);
 
 impl<T: FromValue> FromValue for Range<T> {
     fn from_value(value: Value) -> Result<Self, FromValueError> {
@@ -454,8 +454,7 @@ impl FromValue for bool {
     fn from_value(value: Value) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
-            ValueKind::Path(path) if path.is_ident("true") => Ok(true),
-            ValueKind::Path(path) if path.is_ident("false") => Ok(false),
+            ValueKind::Bool(val) => Ok(val),
             _ => Err(FromValueError::new(
                 span,
                 Error::ExpectedPattern(&["true", "false"]),

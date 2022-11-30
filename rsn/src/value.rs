@@ -126,6 +126,7 @@ impl<'a> From<Spanned<&'a str>> for Path<'a> {
 pub enum ValueKind<'a> {
     Integer(i64),
     Float(f64),
+    Bool(bool),
     String(std::borrow::Cow<'a, str>),
     Char(char),
     Path(Path<'a>),
@@ -145,10 +146,10 @@ pub enum ValueKind<'a> {
 
 impl<'a> PartialEq for ValueKind<'a> {
     fn eq(&self, other: &Self) -> bool {
-        println!("{self} == {other}: ");
-        let res = match (self, other) {
+        match (self, other) {
             (Self::Integer(l0), Self::Integer(r0)) => l0 == r0,
             (Self::Float(l0), Self::Float(r0)) => l0 == r0,
+            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::String(l0), Self::String(r0)) => l0 == r0,
             (Self::Char(l0), Self::Char(r0)) => l0 == r0,
             (
@@ -171,9 +172,7 @@ impl<'a> PartialEq for ValueKind<'a> {
             (Self::Struct(l0), Self::Struct(r0)) => l0 == r0,
             (Self::NamedStruct(l0, l1), Self::NamedStruct(r0, r1)) => l0 == r0 && l1 == r1,
             _ => false,
-        };
-        println!("{res}");
-        res
+        }
     }
 }
 
@@ -182,6 +181,7 @@ impl<'a> Display for ValueKind<'a> {
         match self {
             ValueKind::Integer(i) => write!(f, "{i}"),
             ValueKind::Float(i) => write!(f, "{i}"),
+            ValueKind::Bool(i) => write!(f, "{i}"),
             ValueKind::String(s) => write!(f, "\"{s}\""),
             ValueKind::Char(c) => write!(f, "'{c}'"),
             ValueKind::Range {

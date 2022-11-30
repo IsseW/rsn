@@ -191,7 +191,11 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn parse_number(&mut self, start: Position, c: char) -> Result<Value<'a>, ParseError> {
+    fn parse_number(&mut self, start: Position, mut c: char) -> Result<Value<'a>, ParseError> {
+        let neg = c == '-';
+        if neg {
+            c = self.next_c()?;
+        }
         let base = if c == '0' {
             match self.next_c_matches(|c| matches!(c, 'x' | 'X' | 'o' | 'O' | 'b' | 'B')) {
                 Ok('x' | 'X') => 16,
@@ -246,7 +250,7 @@ impl<'a> Chars<'a> {
             let i = i64::from_str_radix(number, base)
                 .map_err(|_| self.error(start, Error::InvalidInteger))?;
 
-            Ok(self.spanned(start, ValueKind::Integer(i)))
+            Ok(self.spanned(start, ValueKind::Integer(if base != 10 && neg { -i } else { i })))
         }
     }
 
@@ -499,6 +503,10 @@ impl<'a> Chars<'a> {
                 } else if self.assume_next_nw('{').is_ok() {
                     let value = self.parse_struct()?;
                     ok!(ValueKind::NamedStruct(path, value))
+                } else if path.is_ident("true") {
+                    ok!(ValueKind::Bool(true))
+                } else if path.is_ident("false") {
+                    ok!(ValueKind::Bool(false))
                 } else {
                     ok!(ValueKind::Path(path.inner()))
                 }

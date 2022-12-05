@@ -148,3 +148,19 @@ The `FromValue` trait has been implemented by the following types in this crate.
  - For certain `vek` types with a feature enabled.
 
 This trait can be implemented manually, or with a derive macro.
+
+# Derive macro
+
+To use the derive macro put `#[derive(FromValue)]` on your struct/enum. This will implement `FromValue` on the struct/enum. If it is a tuple struct it will also implement `UnnamedFields`, and if it is a struct with named fields it will implement `NamedFields`.
+
+There are some attributes you can use to alter the behaviour of the derive macro.
+
+You can put these on structs/enums/enum variants.
+ - `#[rsn(untagged)]`, this will make it so you don't have to explicitly write the name of the item. If it is a struct you will instead write a tuple/struct without writing the name of the struct. If it is an enum you will just have to write the name of the variant. If you put untagged on a variant, you will not have to write the name of that variant and instead write it as if it was a struct, and it will match the first variant which works.
+ - `#[rsn(rename = Foo)]` parses the item as if it has the identifier `Foo`.
+
+There are other options you can use on fields.
+ - `#[rsn(flatten)]` if in a named field context, the type of this field has to implement `NamedFields` or if in a unnamed field context this fields type has to implement `UnnamedFields`. `flatten` will parse as if this container has the fields of the field with the attribute. If there are required fields with the same identifier there will be compile errors.
+ - `#[rsn(default)]` makes this field optional. If the field isn't specified it will use `Default::default()`, so it has to implement default. This only works in named field contexts.
+ - `#[rsn(skip)]` ignores this field when parsing and assigns it will use `Default::default()`, so it has to implement default.
+ - `#[rsn(rename = foo)]` parses the field as if it has the identifier `foo`.

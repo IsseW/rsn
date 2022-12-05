@@ -515,9 +515,10 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                     let optional_fields = optional_fields.into_iter().map(|ident| ident.to_string());
 
                     extra_impl = quote!(
+                        type __Set = #set;
                         #[automatically_derived]
                         impl #generics_bounds  __rsn::NamedFields for #ident #generics {
-                            type Fields = #set;
+                            type Fields = __Set;
 
                             const REQUIRED_FIELDS: &'static [&'static str] = &[#(#required_fields),*];
                             const OPTIONAL_FIELDS: &'static [&'static str] = &[#(#optional_fields),*];
@@ -529,7 +530,8 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                             }
                         }
 
-                        const IS_VALID: bool = <<#ident as __rsn::NamedFields>::Fields as __rsn::__types::Set>::IS_VALID;
+
+                        const IS_VALID: bool = <__Set as __rsn::__types::Set>::IS_VALID;
                         
                         if !IS_VALID {
                             panic!("There are required fields with the same identifier");

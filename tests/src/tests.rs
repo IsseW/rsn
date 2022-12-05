@@ -106,6 +106,13 @@ fn test_struct_derive() {
     #[derive(Debug, PartialEq, FromValue)]
     struct Test<T>(T);
 
+
+    #[derive(Debug, PartialEq, FromValue)]
+    struct Test2<T> {
+        a: T,
+        b: T,
+    }
+
     #[derive(Debug, PartialEq, FromValue)]
     struct Foo;
 
@@ -124,6 +131,10 @@ fn test_struct_derive() {
     }
 
     test_repr!(Test(2));
+    test_repr!(Test2 {
+        a: 3,
+        b: 4,
+    });
 
     test_repr!(Foo);
 

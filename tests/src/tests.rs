@@ -102,6 +102,10 @@ fn test_tuple() {
 
 #[test]
 fn test_struct_derive() {
+
+    #[derive(Debug, PartialEq, FromValue)]
+    struct Test<T>(T);
+
     #[derive(Debug, PartialEq, FromValue)]
     struct Foo;
 
@@ -118,6 +122,8 @@ fn test_struct_derive() {
         tuple: (Foo, u32, i32),
         range: RangeInclusive<f32>,
     }
+
+    test_repr!(Test(2));
 
     test_repr!(Foo);
 

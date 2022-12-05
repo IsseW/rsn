@@ -429,6 +429,27 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
     let mut extra_impl = quote!();
     let generics = &input.generics;
 
+
+    let mut generics_bounds = generics.clone();
+    for param in &mut generics_bounds.params {
+        if let syn::GenericParam::Type(param) = param {
+            param
+                .bounds
+                .push(syn::TypeParamBound::Trait(syn::TraitBound {
+                    paren_token: None,
+                    modifier: syn::TraitBoundModifier::None,
+                    lifetimes: None,
+                    path: syn::Path {
+                        leading_colon: None,
+                        segments: syn::punctuated::Punctuated::from_iter([
+                            syn::PathSegment::from(format_ident!("__rsn")),
+                            syn::PathSegment::from(format_ident!("FromValue")),
+                        ]),
+                    },
+                }))
+        }
+    }
+
     let parse = match &input.data {
         syn::Data::Struct(data) => {
             let check_path = (!attrs.untagged).then(|| {
@@ -495,7 +516,7 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
 
                     extra_impl = quote!(
                         #[automatically_derived]
-                        impl #generics  __rsn::NamedFields for #ident #generics {
+                        impl #generics_bounds  __rsn::NamedFields for #ident #generics {
                             type Fields = #set;
 
                             const REQUIRED_FIELDS: &'static [&'static str] = &[#(#required_fields),*];
@@ -545,7 +566,7 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
 
                     extra_impl = quote!(
                         #[automatically_derived]
-                        impl #generics __rsn::UnnamedFields for #ident #generics {
+                        impl #generics_bounds __rsn::UnnamedFields for #ident #generics {
                             const LEN: usize  = #num_fields;
 
                             fn parse_fields<'a, I: Iterator<Item = __rsn::Value<'a>>>(struct_span: __rsn::Span, iter: &mut I) -> Result<Self, __rsn::FromValueError> {
@@ -649,25 +670,6 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
         }
         syn::Data::Union(_) => panic!("Unions aren't supported"),
     };
-    let mut generics_bounds = generics.clone();
-    for param in &mut generics_bounds.params {
-        if let syn::GenericParam::Type(param) = param {
-            param
-                .bounds
-                .push(syn::TypeParamBound::Trait(syn::TraitBound {
-                    paren_token: None,
-                    modifier: syn::TraitBoundModifier::None,
-                    lifetimes: None,
-                    path: syn::Path {
-                        leading_colon: None,
-                        segments: syn::punctuated::Punctuated::from_iter([
-                            syn::PathSegment::from(format_ident!("__rsn")),
-                            syn::PathSegment::from(format_ident!("FromValue")),
-                        ]),
-                    },
-                }))
-        }
-    }
 
     quote! {
         const _: () = {

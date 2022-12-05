@@ -1,4 +1,11 @@
-#![feature(array_try_map, iterator_try_collect, iter_collect_into)]
+#![allow(incomplete_features)]
+#![feature(
+    array_try_map,
+    iterator_try_collect,
+    iter_collect_into,
+    specialization,
+    const_trait_impl,
+)]
 
 mod from_value;
 mod parse;
@@ -8,7 +15,9 @@ mod value;
 pub use from_value::{AnyRange, Error as FromValueErrorKind, FromValue, FromValueError};
 pub use parse::ParseError;
 pub use spanned::{Position, Span, Spanned};
-pub use value::{Map, Path, Value, ValueKind};
+pub use value::{Map, Fields, Path, Value, ValueKind};
+
+pub use from_value::flatten::{NamedFields, UnnamedFields, __types};
 
 #[cfg(feature = "derive")]
 pub use rsn_derive::FromValue;

@@ -2,6 +2,7 @@
 mod hashbrown;
 #[cfg(feature = "impl_vek")]
 mod vek;
+pub mod flatten;
 
 use std::{
     collections::HashMap,

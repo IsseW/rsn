@@ -159,7 +159,7 @@ fn test_enum_derive() {
     test_repr!(Foo::C(true));
 
     #[derive(Debug, PartialEq, FromValue)]
-    #[parse(untagged)]
+    #[rsn(untagged)]
     enum UntaggedEnum {
         A,
         B,
@@ -172,11 +172,11 @@ fn test_enum_derive() {
     assert_eq!(UntaggedEnum::C, parsed);
 
     #[derive(Debug, PartialEq, FromValue)]
-    #[parse(untagged)]
+    #[rsn(untagged)]
     enum Recursive {
-        #[parse(untagged)]
+        #[rsn(untagged)]
         Node(Box<Recursive>, Box<Recursive>),
-        #[parse(untagged)]
+        #[rsn(untagged)]
         Leaf(UntaggedEnum),
     }
 
@@ -221,4 +221,48 @@ fn test_enum_derive() {
             ))
         )
     )
+}
+
+
+#[test]
+fn test_flatten() {
+
+    #[derive(Debug, PartialEq, FromValue)]
+    struct StructA {
+        a: u32,
+        b: u32,
+        c: u32,
+    }
+
+    #[derive(Default, Debug, PartialEq, FromValue)]
+    struct StructB {
+        d: u32,
+        e: u32,
+        f: u32,
+    }
+
+    #[derive(Debug, PartialEq, FromValue)]
+    struct Struct {
+        #[rsn(flatten)]
+        a: StructA,
+        #[rsn(default)]
+        b: StructB,
+    }
+
+    let t: Struct = de("
+        Struct {
+            a: 1,
+            b: 2,
+            c: 3,
+        }
+    ");
+
+    assert_eq!(t, Struct {
+        a: StructA {
+            a: 1,
+            b: 2,
+            c: 3,
+        },
+        b: StructB::default(),
+    });
 }

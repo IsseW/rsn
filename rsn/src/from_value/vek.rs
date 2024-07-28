@@ -4,26 +4,26 @@ use crate::{FromValue, FromValueError, ValueKind};
 
 use super::Error;
 
-impl<T: FromValue> FromValue for Vec2<T> {
-    fn from_value(value: crate::Value) -> Result<Self, crate::FromValueError> {
-        <(T, T)>::from_value(value).map(Self::from)
+impl<M, T: FromValue<M>> FromValue<M> for Vec2<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, crate::FromValueError> {
+        <(T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<T: FromValue> FromValue for Vec3<T> {
-    fn from_value(value: crate::Value) -> Result<Self, crate::FromValueError> {
-        <(T, T, T)>::from_value(value).map(Self::from)
+impl<M, T: FromValue<M>> FromValue<M> for Vec3<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, crate::FromValueError> {
+        <(T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<T: FromValue> FromValue for Vec4<T> {
-    fn from_value(value: crate::Value) -> Result<Self, crate::FromValueError> {
-        <(T, T, T, T)>::from_value(value).map(Self::from)
+impl<M, T: FromValue<M>> FromValue<M> for Vec4<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, crate::FromValueError> {
+        <(T, T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<T: FromValue> FromValue for Aabr<T> {
-    fn from_value(value: crate::Value) -> Result<Self, FromValueError> {
+impl<M, T: FromValue<M>> FromValue<M> for Aabr<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         macro_rules! from_fields {
             ($fields:expr) => {{
@@ -31,13 +31,13 @@ impl<T: FromValue> FromValue for Aabr<T> {
                 let correct_len = fields.len() == 2;
                 let mut get_field = |field| {
                     fields
-                        .remove(field)
+                        .swap_remove(field)
                         .ok_or(FromValueError::new(span, Error::MissingField(field)))
                 };
                 if correct_len {
                     Ok(Aabr {
-                        min: FromValue::from_value(get_field("min")?)?,
-                        max: FromValue::from_value(get_field("max")?)?,
+                        min: FromValue::from_value(get_field("min")?, meta)?,
+                        max: FromValue::from_value(get_field("max")?, meta)?,
                     })
                 } else {
                     get_field("min")?;
@@ -53,16 +53,16 @@ impl<T: FromValue> FromValue for Aabr<T> {
                 max: Some(max),
                 inclusive: true,
             } => Ok(Aabr {
-                min: FromValue::from_value(*min)?,
-                max: FromValue::from_value(*max)?,
+                min: FromValue::from_value(*min, meta)?,
+                max: FromValue::from_value(*max, meta)?,
             }),
             ValueKind::NamedStruct(ident, fields) => {
-                if *ident == "Aabb" {
+                if ident.is_struct("vek::Aabr") {
                     from_fields!(fields)
                 } else {
                     Err(FromValueError {
                         span: ident.span,
-                        value: Error::ExpectedIdent("Aabb"),
+                        value: Error::ExpectedIdent("Aabr"),
                     })
                 }
             }
@@ -81,8 +81,8 @@ impl<T: FromValue> FromValue for Aabr<T> {
     }
 }
 
-impl<T: FromValue> FromValue for Aabb<T> {
-    fn from_value(value: crate::Value) -> Result<Self, FromValueError> {
+impl<M, T: FromValue<M>> FromValue<M> for Aabb<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         macro_rules! from_fields {
             ($fields:expr) => {{
@@ -90,13 +90,13 @@ impl<T: FromValue> FromValue for Aabb<T> {
                 let correct_len = fields.len() == 2;
                 let mut get_field = |field| {
                     fields
-                        .remove(field)
+                        .swap_remove(field)
                         .ok_or(FromValueError::new(span, Error::MissingField(field)))
                 };
                 if correct_len {
                     Ok(Aabb {
-                        min: FromValue::from_value(get_field("min")?)?,
-                        max: FromValue::from_value(get_field("max")?)?,
+                        min: FromValue::from_value(get_field("min")?, meta)?,
+                        max: FromValue::from_value(get_field("max")?, meta)?,
                     })
                 } else {
                     get_field("min")?;
@@ -112,11 +112,11 @@ impl<T: FromValue> FromValue for Aabb<T> {
                 max: Some(max),
                 inclusive: true,
             } => Ok(Aabb {
-                min: FromValue::from_value(*min)?,
-                max: FromValue::from_value(*max)?,
+                min: FromValue::from_value(*min, meta)?,
+                max: FromValue::from_value(*max, meta)?,
             }),
             ValueKind::NamedStruct(ident, fields) => {
-                if *ident == "Aabb" {
+                if ident.is_struct("vek::Aabb") {
                     from_fields!(fields)
                 } else {
                     Err(FromValueError {
@@ -131,23 +131,23 @@ impl<T: FromValue> FromValue for Aabb<T> {
             _ => Err(FromValueError::new(
                 span,
                 Error::ExpectedPattern(&[
-                    "(<value>, <value>)..=(<value>, <value>)",
-                    "{ min: (<value>, <value>), max: (<value>, <value>) }",
-                    "Aabr { min: (<value>, <value>), max: (<value>, <value>) }",
+                    "(<value>, <value>, <value>)..=(<value>, <value>, <value>)",
+                    "{ min: (<value>, <value>, <value>), max: (<value>, <value>, <value>) }",
+                    "Aabr { min: (<value>, <value>, <value>), max: (<value>, <value>, <value>) }",
                 ]),
             )),
         }
     }
 }
 
-impl<T: FromValue> FromValue for Rgb<T> {
-    fn from_value(value: crate::Value) -> Result<Self, crate::FromValueError> {
-        <(T, T, T)>::from_value(value).map(Self::from)
+impl<M, T: FromValue<M>> FromValue<M> for Rgb<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, crate::FromValueError> {
+        <(T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<T: FromValue> FromValue for Rgba<T> {
-    fn from_value(value: crate::Value) -> Result<Self, crate::FromValueError> {
-        <(T, T, T, T)>::from_value(value).map(Self::from)
+impl<M, T: FromValue<M>> FromValue<M> for Rgba<T> {
+    fn from_value(value: crate::Value, meta: &mut M) -> Result<Self, crate::FromValueError> {
+        <(T, T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }

@@ -196,7 +196,7 @@ fn construct_fields_named<'a>(
                 FieldModifier::None => {
                     quote! {
                         #real_ident: __rsn::FromValue::from_value(
-                            fields.remove(#ident_str).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?,
+                            fields.swap_remove(#ident_str).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?,
                             meta,
                         )?
                     }
@@ -209,7 +209,7 @@ fn construct_fields_named<'a>(
                 },
                 FieldModifier::Default => {
                     quote! {
-                        #real_ident: if let Some(value) = fields.remove(#ident_str) {
+                        #real_ident: if let Some(value) = fields.swap_remove(#ident_str) {
                             __rsn::FromValue::from_value(value, meta)?
                         } else {
                             core::default::Default::default()
@@ -335,19 +335,19 @@ fn fields_named(
         } else {
             #(
                 for field in <#flattened as __rsn::NamedFields>::REQUIRED_FIELDS {
-                    fields.remove(*field).ok_or(__rsn::FromValueError::new(span, #error::MissingField(field)))?;
+                    fields.swap_remove(*field).ok_or(__rsn::FromValueError::new(span, #error::MissingField(field)))?;
                 }
             )*
             #(
-                fields.remove(#needed_field_strs).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#needed_field_strs)))?;
+                fields.swap_remove(#needed_field_strs).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#needed_field_strs)))?;
             )*
             #(
                 for field in <#flattened as __rsn::NamedFields>::OPTIONAL_FIELDS {
-                    fields.remove(*field);
+                    fields.swap_remove(*field);
                 }
             )*
             #(
-                fields.remove(#optional_field_strs);
+                fields.swap_remove(#optional_field_strs);
             )*
             let (ident, _) = fields.into_iter().next().unwrap();
 

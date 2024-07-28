@@ -19,7 +19,7 @@ hashbrown = { version = "0.14", optional = true }
 rsn_derive = { path = "../rsn_derive", optional = true }
 
 [features]
-default = ["derive"]
+default = ["derive", "impl_vek", "impl_hashbrown"]
 impl_vek = ["vek"]
 impl_hashbrown = ["hashbrown"]
 derive = ["rsn_derive"]

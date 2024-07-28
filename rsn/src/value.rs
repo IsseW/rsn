@@ -44,7 +44,7 @@ impl<'a> Path<'a> {
     }
 
     pub fn is_ident(&self, ident: &'a str) -> bool {
-        !self.leading && self.idents.len() == 1 && **self.idents.get(0).unwrap() == ident
+        !self.leading && self.idents.len() == 1 && **self.idents.first().unwrap() == ident
     }
 
     pub fn is_enum<const UNTAGGED: bool>(&self, full_path: &str) -> bool {

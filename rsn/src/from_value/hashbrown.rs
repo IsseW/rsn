@@ -3,18 +3,18 @@ use std::hash::{BuildHasher, Hash};
 
 use super::Error;
 
-impl<K, V, S> FromValue for hashbrown::HashMap<K, V, S>
+impl<M, K, V, S> FromValue<M> for hashbrown::HashMap<K, V, S>
 where
-    K: FromValue + Hash + Eq,
-    V: FromValue,
+    K: FromValue<M> + Hash + Eq,
+    V: FromValue<M>,
     S: Default + BuildHasher,
 {
-    fn from_value(value: Value) -> Result<Self, FromValueError> {
+    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Map(map) => map
                 .into_iter()
-                .map(|(k, v)| Ok((K::from_value(k)?, V::from_value(v)?)))
+                .map(|(k, v)| Ok((K::from_value(k, meta)?, V::from_value(v, meta)?)))
                 .try_collect(),
             _ => Err(FromValueError::new(
                 span,

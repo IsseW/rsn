@@ -184,12 +184,16 @@ fn test_enum_derive() {
     assert_eq!(UntaggedEnum::C, parsed);
 
     #[derive(Debug, PartialEq, FromValue)]
+    struct IRecurse(Box<Recursive>);
+
+    #[derive(Debug, PartialEq, FromValue)]
     #[rsn(untagged)]
     enum Recursive {
         #[rsn(untagged)]
         Node(Box<Recursive>, Box<Recursive>),
         #[rsn(untagged)]
         Leaf(UntaggedEnum),
+        Test(#[rsn(skip_bound)] IRecurse),
     }
 
     let parsed: Recursive = de("

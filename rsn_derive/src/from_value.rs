@@ -102,6 +102,7 @@ impl std::fmt::Display for FieldModifier {
 enum FieldAttr {
     FieldModifier(syn::Ident, FieldModifier),
     Rename(syn::Ident, syn::Token![=], syn::Ident),
+    SkipBound(syn::Ident),
 }
 
 impl syn::parse::Parse for FieldAttr {
@@ -117,6 +118,7 @@ impl syn::parse::Parse for FieldAttr {
                 FieldModifier::WithExpr(input.parse()?, input.parse()?),
             ),
             "rename" => FieldAttr::Rename(tag, input.parse()?, input.parse()?),
+            "skip_bound" => FieldAttr::SkipBound(tag),
 
             _ => return Err(syn::Error::new(tag.span(), "Unexpected tag")),
         })
@@ -127,6 +129,7 @@ impl syn::parse::Parse for FieldAttr {
 struct FieldAttrs {
     modifier: Option<FieldModifier>,
     rename: Option<syn::Ident>,
+    skip_bound: bool,
 }
 
 impl TryFrom<&Vec<syn::Attribute>> for FieldAttrs {
@@ -154,6 +157,16 @@ impl TryFrom<&Vec<syn::Attribute>> for FieldAttrs {
                                 return Err(syn::Error::new(tag.span(), "Multiple rename tags"));
                             }
                             this.rename = Some(rename);
+                        }
+                        FieldAttr::SkipBound(tag) => {
+                            if this.skip_bound {
+                                return Err(syn::Error::new(
+                                    tag.span(),
+                                    "Multiple skip bound tags",
+                                ));
+                            }
+
+                            this.skip_bound = true;
                         }
                     }
                 }
@@ -263,7 +276,7 @@ fn construct_fields_named<'a>(
                 },
                 Some(FieldModifier::WithExpr(_, expr)) => {
                     quote! {
-                        #real_ident: #expr,
+                        #real_ident: #expr
                     }
                 }
             };
@@ -559,7 +572,112 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                 eq_token: None,
                 default: None,
             }));
+        let where_clause = generics_bounds.make_where_clause();
+
+        fn skip_bound(ty: &syn::Type, ident: &syn::Ident) -> bool {
+            match ty {
+                syn::Type::Array(arr) => skip_bound(&arr.elem, ident),
+                syn::Type::BareFn(_) => false,
+                syn::Type::Group(ty) => skip_bound(&ty.elem, ident),
+                syn::Type::ImplTrait(_) => false,
+                syn::Type::Infer(_) => false,
+                syn::Type::Macro(_) => false,
+                syn::Type::Never(_) => false,
+                syn::Type::Paren(ty) => skip_bound(&ty.elem, ident),
+                syn::Type::Path(path) => {
+                    path.path.is_ident(ident)
+                        || path
+                            .path
+                            .segments
+                            .last()
+                            .map_or(true, |l| match &l.arguments {
+                                syn::PathArguments::AngleBracketed(args) => {
+                                    args.args.iter().any(|arg| match arg {
+                                        syn::GenericArgument::Type(ty) => skip_bound(ty, ident),
+                                        _ => false,
+                                    })
+                                }
+                                _ => false,
+                            })
+                }
+                syn::Type::Ptr(_) => false,
+                syn::Type::Reference(_) => false,
+                syn::Type::Slice(_) => false,
+                syn::Type::TraitObject(_) => false,
+                syn::Type::Tuple(tuple) => tuple.elems.iter().any(|ty| skip_bound(ty, ident)),
+                syn::Type::Verbatim(_) => false,
+                _ => todo!(),
+            }
+        }
+
+        let mut add_type_bound = |ty: &syn::Type| {
+            if skip_bound(ty, real_ident) {
+                return;
+            }
+            where_clause
+                .predicates
+                .push(syn::WherePredicate::Type(syn::PredicateType {
+                    lifetimes: None,
+                    bounded_ty: ty.clone(),
+                    colon_token: syn::Token![:](ty.span()),
+                    bounds: syn::punctuated::Punctuated::from_iter([syn::TypeParamBound::Trait(
+                        syn::TraitBound {
+                            paren_token: None,
+                            modifier: syn::TraitBoundModifier::None,
+                            lifetimes: None,
+                            path: syn::Path {
+                                leading_colon: None,
+                                segments: syn::punctuated::Punctuated::from_iter([
+                                    syn::PathSegment::from(format_ident!("__rsn")),
+                                    syn::PathSegment {
+                                        ident: format_ident!("FromValue"),
+                                        arguments: syn::PathArguments::AngleBracketed(
+                                            syn::AngleBracketedGenericArguments {
+                                                colon2_token: None,
+                                                lt_token: syn::Token![<](ty.span()),
+                                                args: syn::punctuated::Punctuated::from_iter([
+                                                    syn::GenericArgument::Type(meta_type.clone()),
+                                                ]),
+                                                gt_token: syn::Token![>](ty.span()),
+                                            },
+                                        ),
+                                    },
+                                ]),
+                            },
+                        },
+                    )]),
+                }))
+        };
+
+        let mut add_field_bounds = |fields: &syn::Fields| match fields {
+            syn::Fields::Named(fields) => {
+                for field in fields.named.iter() {
+                    if FieldAttrs::try_from(&field.attrs).map_or(true, |attrs| !attrs.skip_bound) {
+                        add_type_bound(&field.ty)
+                    }
+                }
+            }
+            syn::Fields::Unnamed(fields) => {
+                for field in fields.unnamed.iter() {
+                    if FieldAttrs::try_from(&field.attrs).map_or(true, |attrs| !attrs.skip_bound) {
+                        add_type_bound(&field.ty)
+                    }
+                }
+            }
+            syn::Fields::Unit => {}
+        };
+
+        match &input.data {
+            syn::Data::Struct(fields) => add_field_bounds(&fields.fields),
+            syn::Data::Enum(variants) => {
+                for variant in variants.variants.iter() {
+                    add_field_bounds(&variant.fields)
+                }
+            }
+            syn::Data::Union(_) => {}
+        }
     }
+    let where_clause = generics_bounds.where_clause.clone();
 
     let parse = match &input.data {
         syn::Data::Struct(data) => {
@@ -641,7 +759,7 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                         }
 
                         #[automatically_derived]
-                        impl #generics_bounds  __rsn::ParseNamedFields<#meta_type> for #ident #generics {
+                        impl #generics_bounds  __rsn::ParseNamedFields<#meta_type> for #ident #generics #where_clause {
                             fn parse_fields(span: __rsn::Span, fields: &mut __rsn::Fields, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
                                 #construct
                             }
@@ -695,7 +813,7 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                         }
 
                         #[automatically_derived]
-                        impl #generics_bounds __rsn::ParseUnnamedFields<#meta_type> for #ident #generics {
+                        impl #generics_bounds __rsn::ParseUnnamedFields<#meta_type> for #ident #generics #where_clause {
                             fn parse_fields<'a, I: Iterator<Item = __rsn::Value<'a>>>(struct_span: __rsn::Span, iter: &mut I, meta: &mut #meta_type) -> Result<Self, __rsn::FromValueError> {
                                 #construct
                             }
@@ -806,7 +924,7 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
         const _: () = {
             extern crate rsn as __rsn;
             #[automatically_derived]
-            impl #generics_bounds __rsn::FromValue<#meta_type> for #real_ident #generics {
+            impl #generics_bounds __rsn::FromValue<#meta_type> for #real_ident #generics #where_clause {
                 fn from_value(value: __rsn::Value, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
                     let span = value.span;
                     #parse

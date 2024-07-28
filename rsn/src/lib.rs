@@ -43,6 +43,10 @@ impl Display for FullError {
 impl std::error::Error for FullError {}
 
 pub fn de<T: FromValue<()>>(src: &str) -> Result<T, FullError> {
+    de_with_meta(src, &mut ())
+}
+
+pub fn de_with_meta<M, T: FromValue<M>>(src: &str, meta: &mut M) -> Result<T, FullError> {
     Value::parse_str(src)
         .map_err(|e| {
             let mut err = e.display_in_src(src);
@@ -50,7 +54,7 @@ pub fn de<T: FromValue<()>>(src: &str) -> Result<T, FullError> {
             FullError(err)
         })
         .and_then(|v| {
-            T::from_value(v, &mut ()).map_err(|e| {
+            T::from_value(v, meta).map_err(|e| {
                 let mut err = e.display_in_src(src);
                 let _ = write!(err, "{}", e.value);
                 FullError(err)

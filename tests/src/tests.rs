@@ -2,7 +2,7 @@ use std::{collections::HashMap, ops::RangeInclusive};
 
 use rsn::FromValue;
 
-fn de<T: rsn::FromValue>(str: &str) -> T {
+fn de<T: rsn::FromValue<()>>(str: &str) -> T {
     match rsn::de(str) {
         Ok(t) => t,
         Err(err) => panic!("\n{err}\n"),
@@ -102,10 +102,8 @@ fn test_tuple() {
 
 #[test]
 fn test_struct_derive() {
-
     #[derive(Debug, PartialEq, FromValue)]
     struct Test<T>(T);
-
 
     #[derive(Debug, PartialEq, FromValue)]
     struct Test2<T> {
@@ -131,10 +129,7 @@ fn test_struct_derive() {
     }
 
     test_repr!(Test(2));
-    test_repr!(Test2 {
-        a: 3,
-        b: 4,
-    });
+    test_repr!(Test2 { a: 3, b: 4 });
 
     test_repr!(Foo);
 
@@ -240,10 +235,8 @@ fn test_enum_derive() {
     )
 }
 
-
 #[test]
 fn test_flatten() {
-
     #[derive(Debug, PartialEq, FromValue)]
     struct StructA {
         a: u32,
@@ -274,12 +267,11 @@ fn test_flatten() {
         }
     ");
 
-    assert_eq!(t, Struct {
-        a: StructA {
-            a: 1,
-            b: 2,
-            c: 3,
-        },
-        b: StructB::default(),
-    });
+    assert_eq!(
+        t,
+        Struct {
+            a: StructA { a: 1, b: 2, c: 3 },
+            b: StructB::default(),
+        }
+    );
 }

@@ -1,6 +1,8 @@
 use core::marker::PhantomData;
 
+#[allow(dead_code)]
 pub struct Char<const C: char>(u8);
+
 pub enum Yes {}
 pub enum No {}
 

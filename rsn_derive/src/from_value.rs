@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::fmt::Write;
-use syn::{DeriveInput, spanned::Spanned};
+use syn::{spanned::Spanned, DeriveInput};
 
 use crate::type_set;
 
@@ -135,15 +135,21 @@ fn named_help(fields: &syn::FieldsNamed, path: String) -> String {
                     msg,
                     "\n\t{}: <value>, <optional>",
                     field.ident.as_ref().unwrap()
-                ).unwrap();
-            },
+                )
+                .unwrap();
+            }
             FieldModifier::None => {
                 write!(msg, "\n\t{}: <value>,", field.ident.as_ref().unwrap()).unwrap();
-            },
+            }
             FieldModifier::Flatten => {
-                write!(msg, "\n\t{}: <value>, <flattened>", field.ident.as_ref().unwrap()).unwrap();
-            },
-            FieldModifier::Skip => {},
+                write!(
+                    msg,
+                    "\n\t{}: <value>, <flattened>",
+                    field.ident.as_ref().unwrap()
+                )
+                .unwrap();
+            }
+            FieldModifier::Skip => {}
         }
     }
     let _ = write!(msg, "\n}}");
@@ -160,11 +166,11 @@ fn unnamed_help(fields: &syn::FieldsUnnamed, path: String) -> String {
         match attrs.modifier {
             FieldModifier::None => {
                 write!(msg, "\n\t<value>,").unwrap();
-            },
+            }
             FieldModifier::Flatten => {
                 write!(msg, "\n\t<value>, <flattened>").unwrap();
-            },
-            FieldModifier::Default | FieldModifier::Skip => {},
+            }
+            FieldModifier::Default | FieldModifier::Skip => {}
         }
     }
     let _ = write!(msg, "\n)");
@@ -172,7 +178,11 @@ fn unnamed_help(fields: &syn::FieldsUnnamed, path: String) -> String {
     msg
 }
 
-fn construct_fields_named<'a>(fields: &'a syn::FieldsNamed, self_repr: TokenStream, mut handle_field: impl FnMut(&syn::Ident, &'a syn::Type, FieldModifier)) -> TokenStream {
+fn construct_fields_named<'a>(
+    fields: &'a syn::FieldsNamed,
+    self_repr: TokenStream,
+    mut handle_field: impl FnMut(&syn::Ident, &'a syn::Type, FieldModifier),
+) -> TokenStream {
     let error = quote!(__rsn::FromValueErrorKind);
     let field_iter: Vec<_> = fields
         .named
@@ -185,19 +195,22 @@ fn construct_fields_named<'a>(fields: &'a syn::FieldsNamed, self_repr: TokenStre
             let res = match attrs.modifier {
                 FieldModifier::None => {
                     quote! {
-                        #real_ident: __rsn::FromValue::from_value(fields.remove(#ident_str).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?)?
+                        #real_ident: __rsn::FromValue::from_value(
+                            fields.remove(#ident_str).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?,
+                            meta,
+                        )?
                     }
                 },
                 FieldModifier::Flatten => {
                     // Assumes that this field implements `NamedFields`
                     quote!(
-                        #real_ident: __rsn::NamedFields::parse_fields(span, fields)?
+                        #real_ident: __rsn::ParseNamedFields::parse_fields(span, fields, meta)?
                     )
                 },
                 FieldModifier::Default => {
                     quote! {
                         #real_ident: if let Some(value) = fields.remove(#ident_str) {
-                            __rsn::FromValue::from_value(value)?
+                            __rsn::FromValue::from_value(value, meta)?
                         } else {
                             core::default::Default::default()
                         }
@@ -220,15 +233,25 @@ fn construct_fields_named<'a>(fields: &'a syn::FieldsNamed, self_repr: TokenStre
     )
 }
 
-fn construct_fields_unnamed<'a>(fields: &'a syn::FieldsUnnamed, self_repr: TokenStream, mut handle_field: impl FnMut(&'a syn::Type, FieldModifier)) -> TokenStream {
+fn construct_fields_unnamed<'a>(
+    fields: &'a syn::FieldsUnnamed,
+    self_repr: TokenStream,
+    mut handle_field: impl FnMut(&'a syn::Type, FieldModifier),
+) -> TokenStream {
     let field_iter: Vec<_> = fields
         .unnamed
         .iter()
         .map(|field| {
             let attrs = FieldAttrs::from(&field.attrs);
             let res = match attrs.modifier {
-                FieldModifier::None => quote!(__rsn::FromValue::from_value(iter.next().unwrap())?),
-                FieldModifier::Flatten => quote!(__rsn::UnnamedFields::parse_fields(span, iter.next().unwrap())),
+                FieldModifier::None => {
+                    quote!(__rsn::FromValue::from_value(iter.next().unwrap(), meta)?)
+                }
+                FieldModifier::Flatten => quote!(__rsn::ParseUnnamedFields::parse_fields(
+                    span,
+                    iter.next().unwrap(),
+                    meta,
+                )),
                 FieldModifier::Default => panic!("Can't have default fields in a tuple struct"),
                 FieldModifier::Skip => quote!(core::default::Default::default()),
             };
@@ -258,8 +281,8 @@ fn fields_named(
 
     let mut fields_default = Vec::new();
 
-    let field_parse = construct_fields_named(fields, self_repr, |ident, ty, modifier| {
-        match modifier {
+    let field_parse =
+        construct_fields_named(fields, self_repr, |ident, ty, modifier| match modifier {
             FieldModifier::None => {
                 fields_default.push(quote!(
                     #ident: unreachable!()
@@ -286,8 +309,7 @@ fn fields_named(
                     #ident: core::default::Default::default()
                 ));
             }
-        }
-    });
+        });
 
     let min_fields = quote!(
         (#min_fields #(+ <#flattened as __rsn::NamedFields>::MIN_FIELDS)*)
@@ -341,7 +363,6 @@ fn fields_named(
     );
 
     if let Some(check_path) = check_path {
-
         quote!(
             __rsn::ValueKind::NamedStruct(path, mut fields) if #check_path => {
                 #field_parse
@@ -373,14 +394,12 @@ fn fields_unnamed(
 
     let mut flattened = Vec::new();
 
-    let parse_fields = construct_fields_unnamed(fields, self_repr, |ty, modifier| {
-        match modifier {
-            FieldModifier::None => num_fields += 1,
-            FieldModifier::Flatten => {
-                flattened.push(ty);
-            },
-            FieldModifier::Skip | FieldModifier::Default => {},
+    let parse_fields = construct_fields_unnamed(fields, self_repr, |ty, modifier| match modifier {
+        FieldModifier::None => num_fields += 1,
+        FieldModifier::Flatten => {
+            flattened.push(ty);
         }
+        FieldModifier::Skip | FieldModifier::Default => {}
     });
 
     let num_fields = quote!(
@@ -429,8 +448,8 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
     let mut extra_impl = quote!();
     let generics = &input.generics;
 
-
     let mut generics_bounds = generics.clone();
+    let meta_ident = format_ident!("_Rsn_Meta");
     for param in &mut generics_bounds.params {
         if let syn::GenericParam::Type(param) = param {
             param
@@ -443,19 +462,52 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                         leading_colon: None,
                         segments: syn::punctuated::Punctuated::from_iter([
                             syn::PathSegment::from(format_ident!("__rsn")),
-                            syn::PathSegment::from(format_ident!("FromValue")),
+                            syn::PathSegment {
+                                ident: format_ident!("FromValue"),
+                                arguments: syn::PathArguments::AngleBracketed(
+                                    syn::AngleBracketedGenericArguments {
+                                        colon2_token: None,
+                                        lt_token: syn::Token![<](param.span()),
+                                        args: syn::punctuated::Punctuated::from_iter([
+                                            syn::GenericArgument::Type(syn::Type::Path(
+                                                syn::TypePath {
+                                                    qself: None,
+                                                    path: syn::Path {
+                                                        leading_colon: None,
+                                                        segments:
+                                                            syn::punctuated::Punctuated::from_iter(
+                                                                [syn::PathSegment::from(
+                                                                    meta_ident.clone(),
+                                                                )],
+                                                            ),
+                                                    },
+                                                },
+                                            )),
+                                        ]),
+                                        gt_token: syn::Token![>](param.span()),
+                                    },
+                                ),
+                            },
                         ]),
                     },
                 }))
         }
     }
+    generics_bounds
+        .params
+        .push(syn::GenericParam::Type(syn::TypeParam {
+            attrs: Vec::new(),
+            ident: meta_ident.clone(),
+            colon_token: None,
+            bounds: syn::punctuated::Punctuated::new(),
+            eq_token: None,
+            default: None,
+        }));
 
     let parse = match &input.data {
         syn::Data::Struct(data) => {
             let check_path = (!attrs.untagged).then(|| {
-                quote!(
-                    path.is_struct(std::concat!(std::module_path!(), "::", #ident_str))
-                )
+                quote!(path.is_struct(std::concat!(std::module_path!(), "::", #ident_str)))
             });
             match &data.fields {
                 syn::Fields::Named(fields) => {
@@ -463,14 +515,15 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                     let mut optional_fields = Vec::new();
                     let mut flattened_fields = Vec::new();
 
-                    let construct = construct_fields_named(fields, quote!(Self), |ident, ty, modifier| {
-                        match modifier {
-                            FieldModifier::None => required_fields.push(ident.clone()),
-                            FieldModifier::Flatten => flattened_fields.push(ty),
-                            FieldModifier::Default => optional_fields.push(ident.clone()),
-                            FieldModifier::Skip => {},
-                        }
-                    });
+                    let construct =
+                        construct_fields_named(fields, quote!(Self), |ident, ty, modifier| {
+                            match modifier {
+                                FieldModifier::None => required_fields.push(ident.clone()),
+                                FieldModifier::Flatten => flattened_fields.push(ty),
+                                FieldModifier::Default => optional_fields.push(ident.clone()),
+                                FieldModifier::Skip => {}
+                            }
+                        });
 
                     let min_fields = required_fields.len();
                     let min_fields = quote!(
@@ -482,62 +535,68 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                     );
 
                     let set = type_set::make_ident_set(required_fields.clone().into_iter());
-                    let set = type_set::union_all(std::iter::once(set).chain(flattened_fields.into_iter().map(|ty| {
-                        let span = ty.span();
-                        syn::Type::Path(syn::TypePath {
-                            qself: Some(syn::QSelf {
-                                lt_token: syn::token::Lt(span),
-                                ty: Box::new(ty.clone()),
-                                position: 2,
-                                as_token: Some(syn::token::As(span)),
-                                gt_token: syn::token::Gt(span),
-                            }),
-                            path: syn::Path {
-                                leading_colon: None,
-                                segments: syn::punctuated::Punctuated::from_iter([
-                                    syn::PathSegment {
-                                        ident: syn::Ident::new("__rsn", ty.span()),
-                                        arguments: syn::PathArguments::None,
-                                    },
-                                    syn::PathSegment {
-                                        ident: syn::Ident::new("NamedFields", ty.span()),
-                                        arguments: syn::PathArguments::None,
-                                    },
-                                    syn::PathSegment {
-                                        ident: syn::Ident::new("Fields", ty.span()),
-                                        arguments: syn::PathArguments::None,
-                                    },
-                                ]),
-                            },
-                        })
-                    })));
-                    let required_fields = required_fields.into_iter().map(|ident| ident.to_string());
-                    let optional_fields = optional_fields.into_iter().map(|ident| ident.to_string());
+                    let set = type_set::union_all(std::iter::once(set).chain(
+                        flattened_fields.into_iter().map(|ty| {
+                            let span = ty.span();
+                            syn::Type::Path(syn::TypePath {
+                                qself: Some(syn::QSelf {
+                                    lt_token: syn::token::Lt(span),
+                                    ty: Box::new(ty.clone()),
+                                    position: 2,
+                                    as_token: Some(syn::token::As(span)),
+                                    gt_token: syn::token::Gt(span),
+                                }),
+                                path: syn::Path {
+                                    leading_colon: None,
+                                    segments: syn::punctuated::Punctuated::from_iter([
+                                        syn::PathSegment {
+                                            ident: syn::Ident::new("__rsn", ty.span()),
+                                            arguments: syn::PathArguments::None,
+                                        },
+                                        syn::PathSegment {
+                                            ident: syn::Ident::new("NamedFields", ty.span()),
+                                            arguments: syn::PathArguments::None,
+                                        },
+                                        syn::PathSegment {
+                                            ident: syn::Ident::new("Fields", ty.span()),
+                                            arguments: syn::PathArguments::None,
+                                        },
+                                    ]),
+                                },
+                            })
+                        }),
+                    ));
+                    let required_fields =
+                        required_fields.into_iter().map(|ident| ident.to_string());
+                    let optional_fields =
+                        optional_fields.into_iter().map(|ident| ident.to_string());
 
                     extra_impl = quote!(
                         type __Set = #set;
                         #[automatically_derived]
-                        impl #generics_bounds  __rsn::NamedFields for #ident #generics {
+                        impl #generics  __rsn::NamedFields for #ident #generics {
                             type Fields = __Set;
 
                             const REQUIRED_FIELDS: &'static [&'static str] = &[#(#required_fields),*];
                             const OPTIONAL_FIELDS: &'static [&'static str] = &[#(#optional_fields),*];
                             const MIN_FIELDS: usize = #min_fields;
                             const MAX_FIELDS: usize = #max_fields;
+                        }
 
-                            fn parse_fields(span: __rsn::Span, fields: &mut __rsn::Fields) -> ::core::result::Result<Self, __rsn::FromValueError> {
+                        #[automatically_derived]
+                        impl #generics_bounds  __rsn::ParseNamedFields<#meta_ident> for #ident #generics {
+                            fn parse_fields(span: __rsn::Span, fields: &mut __rsn::Fields, meta: &mut #meta_ident) -> ::core::result::Result<Self, __rsn::FromValueError> {
                                 #construct
                             }
                         }
 
-
                         const IS_VALID: bool = <__Set as __rsn::__types::Set>::IS_VALID;
-                        
+
                         if !IS_VALID {
                             panic!("There are required fields with the same identifier");
                         }
                     );
-                    
+
                     let reprs = fields_named(fields, check_path, quote!(Self));
                     let help_msg = named_help(fields, ident_str);
 
@@ -552,15 +611,17 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
                     let mut flattened_fields = Vec::new();
                     let mut num_fields: usize = 0;
 
-                    let construct = construct_fields_unnamed(fields, quote!(Self), |ty, modifier| {
-                        match modifier {
+                    let construct = construct_fields_unnamed(
+                        fields,
+                        quote!(Self),
+                        |ty, modifier| match modifier {
                             FieldModifier::None => num_fields += 1,
                             FieldModifier::Flatten => {
                                 flattened_fields.push(ty);
-                            },
-                            FieldModifier::Default | FieldModifier::Skip => {},
-                        }
-                    });
+                            }
+                            FieldModifier::Default | FieldModifier::Skip => {}
+                        },
+                    );
 
                     let num_fields = quote!(
                         (#num_fields #(+ <<#flattened_fields> as __rsn::UnnamedFields>::LEN)*)
@@ -568,10 +629,13 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
 
                     extra_impl = quote!(
                         #[automatically_derived]
-                        impl #generics_bounds __rsn::UnnamedFields for #ident #generics {
+                        impl #generics __rsn::UnnamedFields for #ident #generics {
                             const LEN: usize  = #num_fields;
+                        }
 
-                            fn parse_fields<'a, I: Iterator<Item = __rsn::Value<'a>>>(struct_span: __rsn::Span, iter: &mut I) -> Result<Self, __rsn::FromValueError> {
+                        #[automatically_derived]
+                        impl #generics_bounds __rsn::ParseUnnamedFields<#meta_ident> for #ident #generics {
+                            fn parse_fields<'a, I: Iterator<Item = __rsn::Value<'a>>>(struct_span: __rsn::Span, iter: &mut I, meta: &mut #meta_ident) -> Result<Self, __rsn::FromValueError> {
                                 #construct
                             }
                         }
@@ -677,8 +741,8 @@ pub fn from_value(input: &DeriveInput) -> TokenStream {
         const _: () = {
             extern crate rsn as __rsn;
             #[automatically_derived]
-            impl #generics_bounds __rsn::FromValue for #real_ident #generics {
-                fn from_value(value: __rsn::Value) -> ::core::result::Result<Self, __rsn::FromValueError> {
+            impl #generics_bounds __rsn::FromValue<#meta_ident> for #real_ident #generics {
+                fn from_value(value: __rsn::Value, meta: &mut #meta_ident) -> ::core::result::Result<Self, __rsn::FromValueError> {
                     let span = value.span;
                     #parse
                 }

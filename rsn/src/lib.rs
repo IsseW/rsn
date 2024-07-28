@@ -4,7 +4,7 @@
     iterator_try_collect,
     iter_collect_into,
     specialization,
-    const_trait_impl,
+    const_trait_impl
 )]
 
 mod from_value;
@@ -15,9 +15,11 @@ mod value;
 pub use from_value::{AnyRange, Error as FromValueErrorKind, FromValue, FromValueError};
 pub use parse::ParseError;
 pub use spanned::{Position, Span, Spanned};
-pub use value::{Map, Fields, Path, Value, ValueKind};
+pub use value::{Fields, Map, Path, Value, ValueKind};
 
-pub use from_value::flatten::{NamedFields, UnnamedFields, __types};
+pub use from_value::flatten::{
+    NamedFields, ParseNamedFields, ParseUnnamedFields, UnnamedFields, __types,
+};
 
 #[cfg(feature = "derive")]
 pub use rsn_derive::FromValue;
@@ -40,7 +42,7 @@ impl Display for FullError {
 
 impl std::error::Error for FullError {}
 
-pub fn de<T: FromValue>(src: &str) -> Result<T, FullError> {
+pub fn de<T: FromValue<()>>(src: &str) -> Result<T, FullError> {
     Value::parse_str(src)
         .map_err(|e| {
             let mut err = e.display_in_src(src);
@@ -48,7 +50,7 @@ pub fn de<T: FromValue>(src: &str) -> Result<T, FullError> {
             FullError(err)
         })
         .and_then(|v| {
-            T::from_value(v).map_err(|e| {
+            T::from_value(v, &mut ()).map_err(|e| {
                 let mut err = e.display_in_src(src);
                 let _ = write!(err, "{}", e.value);
                 FullError(err)
@@ -66,7 +68,7 @@ mod tests {
     #[test]
     fn test_parse() {
         assert_eq!(
-            u32::from_value(Value::parse_str("123").unwrap()).unwrap(),
+            u32::from_value(Value::parse_str("123").unwrap(), &mut ()).unwrap(),
             123
         );
         assert_eq!(

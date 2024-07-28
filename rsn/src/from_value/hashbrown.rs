@@ -23,3 +23,22 @@ where
         }
     }
 }
+
+impl<M, K> FromValue<M> for hashbrown::HashSet<K>
+where
+    K: FromValue<M> + Hash + Eq,
+{
+    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+        let span = value.span;
+        match value.inner() {
+            ValueKind::Array(seq) => seq
+                .into_iter()
+                .map(|k| (K::from_value(k, meta)))
+                .try_collect(),
+            _ => Err(FromValueError::new(
+                span,
+                Error::ExpectedPattern(&["[<value>, <value>, ...]"]),
+            )),
+        }
+    }
+}

@@ -135,6 +135,7 @@ dependencies = [
  "impl-trait-for-tuples",
  "indexmap",
  "rsn_derive",
+ "rsn_parser",
  "vek",
 ]
 
@@ -144,7 +145,15 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
+ "rsn_parser",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "rsn_parser"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
 ]
 
 [[package]]

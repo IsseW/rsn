@@ -2,6 +2,6 @@
 resolver="2"
 members=[
     "rsn",
-    "rsn_derive",
+    "rsn_derive", "rsn_parser",
     "tests",
 ]

@@ -97,6 +97,7 @@ int_from_value! {
     i16,
     i32,
     i64,
+    i128,
     isize,
     u8,
     u16,

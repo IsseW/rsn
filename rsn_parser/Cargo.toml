@@ -1,0 +1,9 @@
+[package]
+name = "rsn_parser"
+version = "0.1.0"
+author = "Isse"
+repository = "https://github.com/IsseW/rsn"
+edition = "2021"
+
+[dependencies]
+indexmap = "2.2.6"

@@ -1,6 +1,11 @@
+#![feature(iter_collect_into)]
 use std::{borrow::Cow, fmt::Display, ops::RangeInclusive, str::CharIndices};
 
-use crate::{Map, Path, Position, Span, Spanned, Value, ValueKind};
+use spanned::{Position, Span, Spanned};
+use value::{Map, Path, Value, ValueKind};
+
+pub mod spanned;
+pub mod value;
 
 #[derive(Clone, Debug)]
 pub enum Error {
@@ -20,18 +25,20 @@ impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::UnexpectedSymbol => write!(f, "Unexpected Symbol"),
-            Error::UnexpectedEnd => write!(f, "Unexpected EOF"),
-            Error::ExpectedEnd => write!(f, "Expected EOF"),
+            Error::UnexpectedEnd => write!(f, "Unexpected end of input"),
+            Error::ExpectedEnd => write!(f, "Expected end of input"),
             Error::Expected(c) => write!(f, "Expected '{c}'"),
             Error::ExpectedRange(c) => write!(f, "Expected '{}'..='{}'", c.start(), c.end()),
             Error::InclusiveNoEnd => write!(f, "Expected end value for inclusive range"),
-            Error::InvalidFloat => write!(f, "Invalid float."),
-            Error::InvalidInteger => write!(f, "Invalid integer."),
-            Error::DuplicateIdent => write!(f, "The same identifier is seen multiple times."),
-            Error::ExpectedFatArrow => write!(f, "Expected `=>`."),
+            Error::InvalidFloat => write!(f, "Invalid float"),
+            Error::InvalidInteger => write!(f, "Invalid integer"),
+            Error::DuplicateIdent => write!(f, "The same identifier is seen multiple times"),
+            Error::ExpectedFatArrow => write!(f, "Expected `=>`"),
         }
     }
 }
+
+impl std::error::Error for Error {}
 
 pub type ParseError = Spanned<Error>;
 
@@ -49,10 +56,11 @@ fn escape(c: char) -> Option<char> {
 }
 
 #[derive(Clone)]
-pub(crate) struct Chars<'a> {
+pub struct Chars<'a> {
     chars: CharIndices<'a>,
-    src: &'a str,
-    place: Position,
+
+    pub src: &'a str,
+    pub place: Position,
 }
 
 impl<'a> Chars<'a> {
@@ -64,32 +72,32 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn spanned<T>(&self, start: Position, value: T) -> Spanned<T> {
+    pub fn spanned<T>(&self, start: Position, value: T) -> Spanned<T> {
         Spanned {
             span: Span::new(start, self.place),
             value,
         }
     }
 
-    fn error_end(&self) -> ParseError {
+    pub fn error_end(&self) -> ParseError {
         self.spanned(self.place, Error::UnexpectedEnd)
     }
 
-    fn error1(&self, error: Error) -> ParseError {
+    pub fn error1(&self, error: Error) -> ParseError {
         self.spanned(self.place, error)
     }
 
-    fn error(&self, start: Position, error: Error) -> ParseError {
+    pub fn error(&self, start: Position, error: Error) -> ParseError {
         self.spanned(start, error)
     }
 
-    fn next_place(&self) -> Position {
+    pub fn next_place(&self) -> Position {
         let mut peek = self.clone();
         let _ = peek.next_c();
         peek.place
     }
 
-    fn peek(&mut self, mut f: impl FnMut(&mut Self) -> Result<bool, ParseError>) -> bool {
+    pub fn peek(&mut self, mut f: impl FnMut(&mut Self) -> Result<bool, ParseError>) -> bool {
         let mut peek = self.clone();
         if f(&mut peek).unwrap_or(false) {
             *self = peek;
@@ -99,7 +107,7 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn next_nw(&mut self) -> Result<char, ParseError> {
+    pub fn next_nw(&mut self) -> Result<char, ParseError> {
         for (i, c) in &mut self.chars {
             self.place.byte_start = i;
             self.place.byte_end = i + c.len_utf8();
@@ -114,7 +122,7 @@ impl<'a> Chars<'a> {
         Err(self.error_end())
     }
 
-    fn next_c(&mut self) -> Result<char, ParseError> {
+    pub fn next_c(&mut self) -> Result<char, ParseError> {
         let res = self.chars.next();
         if let Some((i, c)) = res {
             self.place.byte_start = i;
@@ -128,7 +136,7 @@ impl<'a> Chars<'a> {
         res.map(|(_, c)| c).ok_or_else(|| self.error_end())
     }
 
-    fn next_nw_matches(&mut self, f: impl FnOnce(&char) -> bool) -> Result<char, ParseError> {
+    pub fn next_nw_matches(&mut self, f: impl FnOnce(&char) -> bool) -> Result<char, ParseError> {
         let mut peek = self.clone();
         let res = match peek.next_nw() {
             Ok(c) => {
@@ -146,7 +154,7 @@ impl<'a> Chars<'a> {
         res
     }
 
-    fn next_c_matches(&mut self, f: impl FnMut(&char) -> bool) -> Result<char, ParseError> {
+    pub fn next_c_matches(&mut self, f: impl FnMut(&char) -> bool) -> Result<char, ParseError> {
         let mut peek = self.clone();
         let res = peek
             .next_c()
@@ -159,7 +167,7 @@ impl<'a> Chars<'a> {
         res
     }
 
-    fn assume_next(&mut self, char: char) -> Result<char, ParseError> {
+    pub fn assume_next(&mut self, char: char) -> Result<char, ParseError> {
         self.next_c_matches(|c| *c == char).map_err(|err| {
             err.map(|err| match err {
                 Error::UnexpectedSymbol => Error::Expected(char),
@@ -168,7 +176,7 @@ impl<'a> Chars<'a> {
         })
     }
 
-    fn assume_next_nw(&mut self, char: char) -> Result<char, ParseError> {
+    pub fn assume_next_nw(&mut self, char: char) -> Result<char, ParseError> {
         self.next_nw_matches(|c| *c == char).map_err(|err| {
             err.map(|err| match err {
                 Error::UnexpectedSymbol => Error::Expected(char),
@@ -191,7 +199,7 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn parse_number(&mut self, start: Position, mut c: char) -> Result<Value<'a>, ParseError> {
+    pub fn parse_number(&mut self, start: Position, mut c: char) -> Result<Value<'a>, ParseError> {
         let neg = c == '-';
         if neg {
             c = self.next_c()?;
@@ -247,20 +255,27 @@ impl<'a> Chars<'a> {
 
             Ok(self.spanned(start, ValueKind::Float(f)))
         } else {
-            let i = i64::from_str_radix(number, base)
+            let i = i128::from_str_radix(number, base)
                 .map_err(|_| self.error(start, Error::InvalidInteger))?;
 
-            Ok(self.spanned(start, ValueKind::Integer(if base != 10 && neg { -i } else { i })))
+            Ok(self.spanned(
+                start,
+                ValueKind::Integer(if base != 10 && neg { -i } else { i }),
+            ))
         }
     }
 
-    fn parse_sequence(&mut self, end: char) -> Result<Vec<Value<'a>>, ParseError> {
+    pub fn parse_sequence(
+        &mut self,
+        end: char,
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
+    ) -> Result<Vec<Value<'a>>, ParseError> {
         let mut values = Vec::new();
         if self.assume_next_nw(end).is_ok() {
             return Ok(values);
         }
         loop {
-            let value = self.parse_value()?;
+            let value = self.parse_value(custom)?;
             values.push(value);
 
             match (self.assume_next_nw(','), self.assume_next_nw(end)) {
@@ -271,21 +286,25 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn parse_map(&mut self, start: Position) -> Result<Value<'a>, ParseError> {
+    pub fn parse_map(
+        &mut self,
+        start: Position,
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
+    ) -> Result<Value<'a>, ParseError> {
         let mut map = Vec::new();
 
         if self.assume_next_nw('}').is_ok() {
             return Ok(self.spanned(start, ValueKind::Map(map)));
         }
         loop {
-            let key = self.parse_value()?;
+            let key = self.parse_value(custom)?;
 
             self.assume_next_nw('=')
                 .map_err(|err| err.map(|_| Error::ExpectedFatArrow))?;
             self.assume_next('>')
                 .map_err(|err| err.map(|_| Error::ExpectedFatArrow))?;
 
-            let value = self.parse_value()?;
+            let value = self.parse_value(custom)?;
 
             map.push((key, value));
 
@@ -297,7 +316,11 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn parse_ident(&mut self, c: char, start: Position) -> Result<Spanned<&'a str>, ParseError> {
+    pub fn parse_ident(
+        &mut self,
+        c: char,
+        start: Position,
+    ) -> Result<Spanned<&'a str>, ParseError> {
         if !(c.is_alphabetic() || c == '_') {
             panic!()
         }
@@ -312,7 +335,10 @@ impl<'a> Chars<'a> {
         Ok(self.spanned(start, &self.src[start.byte_start..self.place.byte_end]))
     }
 
-    fn parse_struct(&mut self) -> Result<Map<Spanned<&'a str>, Value<'a>>, ParseError> {
+    pub fn parse_struct(
+        &mut self,
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
+    ) -> Result<Map<Spanned<&'a str>, Value<'a>>, ParseError> {
         let mut map = Map::new();
 
         loop {
@@ -323,7 +349,7 @@ impl<'a> Chars<'a> {
 
             self.assume_next_nw(':')?;
 
-            let value = self.parse_value()?;
+            let value = self.parse_value(custom)?;
 
             if map.insert(ident, value).is_some() {
                 return Err(Spanned {
@@ -349,7 +375,7 @@ impl<'a> Chars<'a> {
         }
     }
 
-    fn parse_path(&mut self, c: char, start: Position) -> Result<Path<'a>, ParseError> {
+    pub fn parse_path(&mut self, c: char, start: Position) -> Result<Path<'a>, ParseError> {
         let leading = c == ':';
         let ident_start = if leading {
             self.assume_next(':')?;
@@ -391,11 +417,14 @@ impl<'a> Chars<'a> {
         }
     }
 
-    pub fn parse_value(&mut self) -> Result<Value<'a>, ParseError> {
+    pub fn parse_value(
+        &mut self,
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
+    ) -> Result<Value<'a>, ParseError> {
         let c = self.next_nw_matches(|c| {
             matches!(
                 c,
-                '\'' | '"' | '0'..='9' | '-' | '(' | '[' | '{' | '_' | ':' | '.'
+                '\'' | '"' | '0'..='9' | '-' | '(' | '[' | '{' | '_' | ':' | '.' | '#'
             ) || c.is_alphabetic()
         })?;
         let start = self.place;
@@ -406,6 +435,7 @@ impl<'a> Chars<'a> {
         }
 
         let value = match c {
+            '#' => Ok(custom(self)?),
             '\'' => {
                 let c = self.next_c()?;
                 let c = match c {
@@ -446,16 +476,16 @@ impl<'a> Chars<'a> {
             }
             c @ '0'..='9' | c @ '-' => self.parse_number(start, c),
             '(' => {
-                let seq = self.parse_sequence(')')?;
+                let seq = self.parse_sequence(')', custom)?;
                 ok!(ValueKind::Tuple(seq))
             }
             '[' => {
-                let seq = self.parse_sequence(']')?;
+                let seq = self.parse_sequence(']', custom)?;
                 ok!(ValueKind::Array(seq))
             }
             '{' => {
                 let mut peek = self.clone();
-                match peek.parse_map(start) {
+                match peek.parse_map(start, custom) {
                     Ok(map) => {
                         *self = peek;
                         Ok(map)
@@ -464,7 +494,7 @@ impl<'a> Chars<'a> {
                         value: Error::ExpectedFatArrow,
                         ..
                     }) => self
-                        .parse_struct()
+                        .parse_struct(custom)
                         .map(|v| self.spanned(start, ValueKind::Struct(v))),
                     e => e,
                 }
@@ -479,7 +509,7 @@ impl<'a> Chars<'a> {
 
                 let err = peek.error(start, Error::InclusiveNoEnd);
 
-                let end = peek.parse_value();
+                let end = peek.parse_value(custom);
 
                 if end.is_err() && inclusive {
                     return Err(err);
@@ -498,10 +528,10 @@ impl<'a> Chars<'a> {
                 let path = self.parse_path(c, start)?;
                 let path = self.spanned(start, path);
                 if self.assume_next_nw('(').is_ok() {
-                    let tuple = self.parse_sequence(')')?;
+                    let tuple = self.parse_sequence(')', custom)?;
                     ok!(ValueKind::NamedTuple(path, tuple))
                 } else if self.assume_next_nw('{').is_ok() {
-                    let value = self.parse_struct()?;
+                    let value = self.parse_struct(custom)?;
                     ok!(ValueKind::NamedStruct(path, value))
                 } else if path.is_ident("true") {
                     ok!(ValueKind::Bool(true))
@@ -522,7 +552,7 @@ impl<'a> Chars<'a> {
 
                 let err = peek.error(other_start, Error::InclusiveNoEnd);
 
-                let end = peek.parse_value();
+                let end = peek.parse_value(custom);
 
                 if end.is_err() && inclusive {
                     Err(err)

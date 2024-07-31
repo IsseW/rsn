@@ -8,14 +8,16 @@
 )]
 
 mod from_value;
-mod parse;
-mod spanned;
-mod value;
+mod to_value;
 
 pub use from_value::{AnyRange, Error as FromValueErrorKind, FromValue, FromValueError};
-pub use parse::ParseError;
-pub use spanned::{Position, Span, Spanned};
-pub use value::{Fields, Map, Path, Value, ValueKind};
+pub use rsn_derive::rsn;
+pub use rsn_parser::{
+    spanned::{Position, Span, Spanned},
+    value::{Fields, Map, Path, Value, ValueKind},
+    Error, ParseError,
+};
+pub use to_value::ToValue;
 
 pub use from_value::flatten::{
     NamedFields, ParseNamedFields, ParseUnnamedFields, UnnamedFields, __types,
@@ -60,6 +62,15 @@ pub fn de_with_meta<M, T: FromValue<M>>(src: &str, meta: &mut M) -> Result<T, Fu
                 FullError(err)
             })
         })
+}
+
+pub fn ser<T: ToValue<()>>(value: &T) -> String {
+    ser_with_meta(value, &())
+}
+
+pub fn ser_with_meta<M, T: ToValue<M>>(value: &T, meta: &M) -> String {
+    let _value = value.to_value(meta);
+    todo!()
 }
 
 #[cfg(test)]

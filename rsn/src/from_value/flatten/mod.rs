@@ -1,4 +1,4 @@
-use crate::{value::Fields, Span, Value};
+use crate::{Fields, Span, Value};
 
 #[doc(hidden)]
 pub mod __types;

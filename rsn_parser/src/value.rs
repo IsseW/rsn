@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{parse::Chars, ParseError, Position, Span, Spanned};
+use crate::{Chars, ParseError, Position, Span, Spanned};
 
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
@@ -124,7 +124,7 @@ impl<'a> From<Spanned<&'a str>> for Path<'a> {
 
 #[derive(Clone, Debug)]
 pub enum ValueKind<'a> {
-    Integer(i64),
+    Integer(i128),
     Float(f64),
     Bool(bool),
     String(std::borrow::Cow<'a, str>),
@@ -142,6 +142,7 @@ pub enum ValueKind<'a> {
     NamedTuple(Spanned<Path<'a>>, Vec<Value<'a>>),
     Struct(Fields<'a>),
     NamedStruct(Spanned<Path<'a>>, Fields<'a>),
+    Custom(&'a str),
 }
 
 impl<'a> PartialEq for ValueKind<'a> {
@@ -237,19 +238,33 @@ impl<'a> Display for ValueKind<'a> {
                     .try_for_each(|(field, value)| write!(f, "{field}: {value}, "))?;
                 write!(f, "}}")
             }
+            ValueKind::Custom(s) => write!(f, "{s}"),
         }
     }
 }
 
 pub type Value<'a> = Spanned<ValueKind<'a>>;
 
+fn no_custom<'a>(chars: &mut Chars<'a>) -> Result<Value<'a>, ParseError> {
+    Err(chars.error1(crate::Error::UnexpectedSymbol))
+}
+
 impl<'a> Value<'a> {
     /// Parses a str to a value.
     /// Returns `Err` if the string is not a valid value.
     pub fn parse_str(src: &'a str) -> Result<Self, ParseError> {
+        Self::parse_str_with_custom(src, no_custom)
+    }
+
+    /// Parses a str to a value.
+    /// Returns `Err` if the string is not a valid value.
+    pub fn parse_str_with_custom(
+        src: &'a str,
+        custom: impl Fn(&mut Chars<'a>) -> Result<Value<'a>, crate::ParseError>,
+    ) -> Result<Self, ParseError> {
         let mut chars = Chars::new(src);
 
-        let value = chars.parse_value()?;
+        let value = chars.parse_value(&custom)?;
         chars.end(value)
     }
 }

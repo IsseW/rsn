@@ -32,13 +32,21 @@ impl Position {
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Span {
-    start: Position,
-    end: Position,
+    pub start: Position,
+    pub end: Position,
 }
 
 impl Span {
     pub fn new(start: Position, end: Position) -> Self {
         Self { start, end }
+    }
+
+    pub fn empty() -> Self {
+        Self::new(Position::start(), Position::start())
+    }
+
+    pub fn byte_range(&self) -> std::ops::Range<usize> {
+        self.start.byte_start..self.end.byte_end
     }
 }
 

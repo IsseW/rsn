@@ -2,6 +2,27 @@ use std::{collections::HashMap, ops::RangeInclusive};
 
 use rsn::FromValue;
 
+#[test]
+fn test_rsn_macro() {
+    let test_integer = 2;
+    let value = rsn::rsn! {
+        Test {
+            a: #test_integer,
+            b: "hello!",
+        }
+    };
+    #[derive(FromValue)]
+    struct Test {
+        a: u32,
+        b: String,
+    }
+
+    let test = Test::from_value(value, &mut ()).unwrap();
+
+    assert_eq!(test.a, test_integer);
+    assert_eq!(test.b, "hello!");
+}
+
 fn de<T: rsn::FromValue<()>>(str: &str) -> T {
     match rsn::de(str) {
         Ok(t) => t,

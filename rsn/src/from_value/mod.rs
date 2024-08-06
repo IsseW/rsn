@@ -64,15 +64,15 @@ impl Display for Error {
 
 pub type FromValueError = Spanned<Error>;
 
-pub trait FromValue<M>: Sized {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError>;
+pub trait FromValue<M, C>: Sized {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError>;
 }
 
 macro_rules! int_from_value {
     ($($ty:ty),*$(,)?) => {
         $(
-        impl<M> FromValue<M> for $ty {
-            fn from_value(value: Value, _meta: &mut M) -> Result<Self, FromValueError> {
+        impl<M, C> FromValue<M, C> for $ty {
+            fn from_value(value: Value<C>, _meta: &mut M) -> Result<Self, FromValueError> {
                 let span = value.span;
                 match value.inner() {
                     ValueKind::Integer(i) => Ok(i.try_into().map_err(|_| FromValueError {
@@ -109,8 +109,8 @@ int_from_value! {
 macro_rules! float_from_value {
     ($($ty:ty),*$(,)?) => {
         $(
-        impl<M> FromValue<M> for $ty {
-            fn from_value(value: Value, _meta: &mut M) -> Result<Self, FromValueError> {
+        impl<M, C> FromValue<M, C> for $ty {
+            fn from_value(value: Value<C>, _meta: &mut M) -> Result<Self, FromValueError> {
                 let span = value.span;
                 match value.inner() {
                     ValueKind::Float(f) => Ok(f as $ty),
@@ -131,8 +131,8 @@ macro_rules! float_from_value {
 
 float_from_value!(f32, f64);
 
-impl<M, T: FromValue<M>> FromValue<M> for Range<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Range<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -148,8 +148,8 @@ impl<M, T: FromValue<M>> FromValue<M> for Range<T> {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for RangeInclusive<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for RangeInclusive<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -165,8 +165,8 @@ impl<M, T: FromValue<M>> FromValue<M> for RangeInclusive<T> {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for RangeFrom<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for RangeFrom<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -182,8 +182,8 @@ impl<M, T: FromValue<M>> FromValue<M> for RangeFrom<T> {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for RangeTo<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for RangeTo<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -199,8 +199,8 @@ impl<M, T: FromValue<M>> FromValue<M> for RangeTo<T> {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for RangeToInclusive<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for RangeToInclusive<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -216,8 +216,8 @@ impl<M, T: FromValue<M>> FromValue<M> for RangeToInclusive<T> {
     }
 }
 
-impl<M> FromValue<M> for RangeFull {
-    fn from_value(value: Value, _: &mut M) -> Result<Self, FromValueError> {
+impl<M, C> FromValue<M, C> for RangeFull {
+    fn from_value(value: Value<C>, _: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -263,8 +263,8 @@ impl<T> RangeBounds<T> for AnyRange<T> {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for AnyRange<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for AnyRange<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Range {
@@ -314,14 +314,17 @@ impl<M, T: FromValue<M>> FromValue<M> for AnyRange<T> {
     }
 }
 
-impl<const N: usize, M, T: FromValue<M>> FromValue<M> for [T; N] {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<const N: usize, M, C, T: FromValue<M, C>> FromValue<M, C> for [T; N] {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Array(s) => {
                 if s.len() == N {
-                    let t: [Value; N] = s.try_into().unwrap();
-                    t.try_map(|t| T::from_value(t, meta))
+                    if let Ok(t) = <[Value<C>; N]>::try_from(s) {
+                        t.try_map(|t| T::from_value(t, meta))
+                    } else {
+                        unreachable!("We just checked the length");
+                    }
                 } else {
                     Err(FromValueError::new(
                         span,
@@ -337,8 +340,8 @@ impl<const N: usize, M, T: FromValue<M>> FromValue<M> for [T; N] {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for Vec<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Vec<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Array(s) => s
@@ -350,8 +353,8 @@ impl<M, T: FromValue<M>> FromValue<M> for Vec<T> {
     }
 }
 
-impl<M, T: FromValue<M>, const N: usize> FromValue<M> for ArrayVec<T, N> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>, const N: usize> FromValue<M, C> for ArrayVec<T, N> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Array(s) => {
@@ -379,12 +382,12 @@ impl<M, T: FromValue<M>, const N: usize> FromValue<M> for ArrayVec<T, N> {
     }
 }
 
-impl<M, K, V> FromValue<M> for HashMap<K, V>
+impl<M, C, K, V> FromValue<M, C> for HashMap<K, V>
 where
-    K: FromValue<M> + Hash + Eq,
-    V: FromValue<M>,
+    K: FromValue<M, C> + Hash + Eq,
+    V: FromValue<M, C>,
 {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Map(map) => map
@@ -399,11 +402,11 @@ where
     }
 }
 
-impl<M, K> FromValue<M> for HashSet<K>
+impl<M, C, K> FromValue<M, C> for HashSet<K>
 where
-    K: FromValue<M> + Hash + Eq,
+    K: FromValue<M, C> + Hash + Eq,
 {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Array(seq) => seq
@@ -419,8 +422,8 @@ where
 }
 
 #[impl_trait_for_tuples::impl_for_tuples(1, 16)]
-impl<M> FromValue<M> for Tuple {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C> FromValue<M, C> for Tuple {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Tuple(seq) => {
@@ -446,8 +449,8 @@ impl<M> FromValue<M> for Tuple {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for Option<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Option<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Path(ident) => {
@@ -476,8 +479,8 @@ impl<M, T: FromValue<M>> FromValue<M> for Option<T> {
     }
 }
 
-impl<M> FromValue<M> for bool {
-    fn from_value(value: Value, _: &mut M) -> Result<Self, FromValueError> {
+impl<M, C> FromValue<M, C> for bool {
+    fn from_value(value: Value<C>, _: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Bool(val) => Ok(val),
@@ -489,8 +492,8 @@ impl<M> FromValue<M> for bool {
     }
 }
 
-impl<M> FromValue<M> for () {
-    fn from_value(value: Value, _: &mut M) -> Result<Self, FromValueError> {
+impl<M, C> FromValue<M, C> for () {
+    fn from_value(value: Value<C>, _: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Tuple(vec) if vec.is_empty() => Ok(()),
@@ -499,8 +502,8 @@ impl<M> FromValue<M> for () {
     }
 }
 
-impl<M> FromValue<M> for String {
-    fn from_value(value: Value, _: &mut M) -> Result<Self, FromValueError> {
+impl<M, C> FromValue<M, C> for String {
+    fn from_value(value: Value<C>, _: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::String(str) => Ok(str.to_string()),
@@ -509,8 +512,8 @@ impl<M> FromValue<M> for String {
     }
 }
 
-impl<M> FromValue<M> for char {
-    fn from_value(value: Value, _: &mut M) -> Result<Self, FromValueError> {
+impl<M, C> FromValue<M, C> for char {
+    fn from_value(value: Value<C>, _: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Char(c) => Ok(c),
@@ -519,33 +522,33 @@ impl<M> FromValue<M> for char {
     }
 }
 
-impl<M, T: FromValue<M>> FromValue<M> for Box<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Box<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)
     }
 }
-impl<M, T: FromValue<M>> FromValue<M> for std::rc::Rc<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for std::rc::Rc<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)
     }
 }
-impl<M, T: FromValue<M>> FromValue<M> for std::sync::Arc<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for std::sync::Arc<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)
     }
 }
-impl<M, T: FromValue<M>> FromValue<M> for std::sync::Mutex<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for std::sync::Mutex<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)
     }
 }
-impl<M, T: FromValue<M>> FromValue<M> for std::sync::RwLock<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for std::sync::RwLock<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)
     }
 }
-impl<M, T: FromValue<M>> FromValue<M> for std::cell::RefCell<T> {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+impl<M, C, T: FromValue<M, C>> FromValue<M, C> for std::cell::RefCell<T> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)
     }
 }

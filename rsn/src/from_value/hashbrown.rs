@@ -3,13 +3,13 @@ use std::hash::{BuildHasher, Hash};
 
 use super::Error;
 
-impl<M, K, V, S> FromValue<M> for hashbrown::HashMap<K, V, S>
+impl<M, C, K, V, S> FromValue<M, C> for hashbrown::HashMap<K, V, S>
 where
-    K: FromValue<M> + Hash + Eq,
-    V: FromValue<M>,
+    K: FromValue<M, C> + Hash + Eq,
+    V: FromValue<M, C>,
     S: Default + BuildHasher,
 {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Map(map) => map
@@ -24,11 +24,11 @@ where
     }
 }
 
-impl<M, K> FromValue<M> for hashbrown::HashSet<K>
+impl<M, C, K> FromValue<M, C> for hashbrown::HashSet<K>
 where
-    K: FromValue<M> + Hash + Eq,
+    K: FromValue<M, C> + Hash + Eq,
 {
-    fn from_value(value: Value, meta: &mut M) -> Result<Self, FromValueError> {
+    fn from_value(value: Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         match value.inner() {
             ValueKind::Array(seq) => seq

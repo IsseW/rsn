@@ -24,7 +24,7 @@ pub use from_value::flatten::{
 };
 
 #[cfg(feature = "derive")]
-pub use rsn_derive::FromValue;
+pub use rsn_derive::{FromValue, ToValue};
 
 use std::fmt::{Debug, Display, Write};
 
@@ -44,11 +44,14 @@ impl Display for FullError {
 
 impl std::error::Error for FullError {}
 
-pub fn de<T: FromValue<()>>(src: &str) -> Result<T, FullError> {
+pub fn de<'a, T: FromValue<(), &'a str>>(src: &'a str) -> Result<T, FullError> {
     de_with_meta(src, &mut ())
 }
 
-pub fn de_with_meta<M, T: FromValue<M>>(src: &str, meta: &mut M) -> Result<T, FullError> {
+pub fn de_with_meta<'a, M, T: FromValue<M, &'a str>>(
+    src: &'a str,
+    meta: &mut M,
+) -> Result<T, FullError> {
     Value::parse_str(src)
         .map_err(|e| {
             let mut err = e.display_in_src(src);
@@ -64,11 +67,11 @@ pub fn de_with_meta<M, T: FromValue<M>>(src: &str, meta: &mut M) -> Result<T, Fu
         })
 }
 
-pub fn ser<T: ToValue<()>>(value: &T) -> String {
+pub fn ser<'a, T: ToValue<(), &'a str>>(value: &'a T) -> String {
     ser_with_meta(value, &())
 }
 
-pub fn ser_with_meta<M, T: ToValue<M>>(value: &T, meta: &M) -> String {
+pub fn ser_with_meta<'a, M, T: ToValue<M, &'a str>>(value: &'a T, meta: &M) -> String {
     let _value = value.to_value(meta);
     todo!()
 }
@@ -79,6 +82,8 @@ mod tests {
 
     use super::from_value::FromValue;
     use super::*;
+
+    type Value<'a> = crate::Value<'a, &'a str>;
 
     #[test]
     fn test_parse() {

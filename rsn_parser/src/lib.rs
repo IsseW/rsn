@@ -19,6 +19,7 @@ pub enum Error {
     InvalidInteger,
     DuplicateIdent,
     ExpectedFatArrow,
+    Custom(String),
 }
 
 impl Display for Error {
@@ -34,6 +35,7 @@ impl Display for Error {
             Error::InvalidInteger => write!(f, "Invalid integer"),
             Error::DuplicateIdent => write!(f, "The same identifier is seen multiple times"),
             Error::ExpectedFatArrow => write!(f, "Expected `=>`"),
+            Error::Custom(c) => write!(f, "{c}"),
         }
     }
 }
@@ -76,6 +78,13 @@ impl<'a> Chars<'a> {
         Spanned {
             span: Span::new(start, self.place),
             value,
+        }
+    }
+
+    pub fn src(&self, start: Position, end: Position) -> Spanned<&'a str> {
+        Spanned {
+            span: Span::new(start, end),
+            value: &self.src[start.byte_start..end.byte_end],
         }
     }
 
@@ -199,7 +208,11 @@ impl<'a> Chars<'a> {
         }
     }
 
-    pub fn parse_number(&mut self, start: Position, mut c: char) -> Result<Value<'a>, ParseError> {
+    pub fn parse_number<C>(
+        &mut self,
+        start: Position,
+        mut c: char,
+    ) -> Result<Value<'a, C>, ParseError> {
         let neg = c == '-';
         if neg {
             c = self.next_c()?;
@@ -265,11 +278,11 @@ impl<'a> Chars<'a> {
         }
     }
 
-    pub fn parse_sequence(
+    pub fn parse_sequence<C>(
         &mut self,
         end: char,
-        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
-    ) -> Result<Vec<Value<'a>>, ParseError> {
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a, C>, ParseError>,
+    ) -> Result<Vec<Value<'a, C>>, ParseError> {
         let mut values = Vec::new();
         if self.assume_next_nw(end).is_ok() {
             return Ok(values);
@@ -286,15 +299,15 @@ impl<'a> Chars<'a> {
         }
     }
 
-    pub fn parse_map(
+    pub fn parse_map<C>(
         &mut self,
         start: Position,
-        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
-    ) -> Result<Value<'a>, ParseError> {
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a, C>, ParseError>,
+    ) -> Result<Value<'a, C>, ParseError> {
         let mut map = Vec::new();
 
         if self.assume_next_nw('}').is_ok() {
-            return Ok(self.spanned(start, ValueKind::Map(map)));
+            return Ok(self.spanned(start, ValueKind::<C>::Map(map)));
         }
         loop {
             let key = self.parse_value(custom)?;
@@ -335,10 +348,10 @@ impl<'a> Chars<'a> {
         Ok(self.spanned(start, &self.src[start.byte_start..self.place.byte_end]))
     }
 
-    pub fn parse_struct(
+    pub fn parse_struct<C>(
         &mut self,
-        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
-    ) -> Result<Map<Spanned<&'a str>, Value<'a>>, ParseError> {
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a, C>, ParseError>,
+    ) -> Result<Map<Spanned<&'a str>, Value<'a, C>>, ParseError> {
         let mut map = Map::new();
 
         loop {
@@ -417,10 +430,11 @@ impl<'a> Chars<'a> {
         }
     }
 
-    pub fn parse_value(
+    pub fn parse_value<C>(
         &mut self,
-        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a>, ParseError>,
-    ) -> Result<Value<'a>, ParseError> {
+        custom: &impl Fn(&mut Chars<'a>) -> Result<Value<'a, C>, ParseError>,
+    ) -> Result<Value<'a, C>, ParseError> {
+        let restore = self.clone();
         let c = self.next_nw_matches(|c| {
             matches!(
                 c,
@@ -435,7 +449,10 @@ impl<'a> Chars<'a> {
         }
 
         let value = match c {
-            '#' => Ok(custom(self)?),
+            '#' => {
+                *self = restore;
+                custom(self)
+            }
             '\'' => {
                 let c = self.next_c()?;
                 let c = match c {
@@ -527,7 +544,10 @@ impl<'a> Chars<'a> {
             c if c == '_' || c.is_alphabetic() => {
                 let path = self.parse_path(c, start)?;
                 let path = self.spanned(start, path);
-                if self.assume_next_nw('(').is_ok() {
+                if self.assume_next_nw('#').is_ok() {
+                    *self = restore;
+                    custom(self)
+                } else if self.assume_next_nw('(').is_ok() {
                     let tuple = self.parse_sequence(')', custom)?;
                     ok!(ValueKind::NamedTuple(path, tuple))
                 } else if self.assume_next_nw('{').is_ok() {

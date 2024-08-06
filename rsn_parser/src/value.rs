@@ -4,7 +4,7 @@ use crate::{Chars, ParseError, Position, Span, Spanned};
 
 pub type Map<K, V> = indexmap::IndexMap<K, V>;
 
-pub type Fields<'a> = Map<Spanned<&'a str>, Value<'a>>;
+pub type Fields<'a, C> = Map<Spanned<&'a str>, Value<'a, C>>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Path<'a> {
@@ -123,29 +123,29 @@ impl<'a> From<Spanned<&'a str>> for Path<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub enum ValueKind<'a> {
+pub enum ValueKind<'a, C = &'a str> {
     Integer(i128),
     Float(f64),
     Bool(bool),
     String(std::borrow::Cow<'a, str>),
     Char(char),
     Path(Path<'a>),
-    Array(Vec<Value<'a>>),
-    Map(Vec<(Value<'a>, Value<'a>)>),
+    Array(Vec<Value<'a, C>>),
+    Map(Vec<(Value<'a, C>, Value<'a, C>)>),
     Range {
-        min: Option<Box<Value<'a>>>,
-        max: Option<Box<Value<'a>>>,
+        min: Option<Box<Value<'a, C>>>,
+        max: Option<Box<Value<'a, C>>>,
         inclusive: bool,
     },
 
-    Tuple(Vec<Value<'a>>),
-    NamedTuple(Spanned<Path<'a>>, Vec<Value<'a>>),
-    Struct(Fields<'a>),
-    NamedStruct(Spanned<Path<'a>>, Fields<'a>),
-    Custom(&'a str),
+    Tuple(Vec<Value<'a, C>>),
+    NamedTuple(Spanned<Path<'a>>, Vec<Value<'a, C>>),
+    Struct(Fields<'a, C>),
+    NamedStruct(Spanned<Path<'a>>, Fields<'a, C>),
+    Custom(C),
 }
 
-impl<'a> PartialEq for ValueKind<'a> {
+impl<'a, C: PartialEq> PartialEq for ValueKind<'a, C> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Integer(l0), Self::Integer(r0)) => l0 == r0,
@@ -172,12 +172,13 @@ impl<'a> PartialEq for ValueKind<'a> {
             (Self::NamedTuple(l0, l1), Self::NamedTuple(r0, r1)) => l0 == r0 && l1 == r1,
             (Self::Struct(l0), Self::Struct(r0)) => l0 == r0,
             (Self::NamedStruct(l0, l1), Self::NamedStruct(r0, r1)) => l0 == r0 && l1 == r1,
+            (Self::Custom(c0), Self::Custom(c1)) => c0 == c1,
             _ => false,
         }
     }
 }
 
-impl<'a> Display for ValueKind<'a> {
+impl<'a, C: Display> Display for ValueKind<'a, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ValueKind::Integer(i) => write!(f, "{i}"),
@@ -243,13 +244,13 @@ impl<'a> Display for ValueKind<'a> {
     }
 }
 
-pub type Value<'a> = Spanned<ValueKind<'a>>;
+pub type Value<'a, C = &'a str> = Spanned<ValueKind<'a, C>>;
 
-fn no_custom<'a>(chars: &mut Chars<'a>) -> Result<Value<'a>, ParseError> {
+fn no_custom<'a, C>(chars: &mut Chars<'a>) -> Result<Value<'a, C>, ParseError> {
     Err(chars.error1(crate::Error::UnexpectedSymbol))
 }
 
-impl<'a> Value<'a> {
+impl<'a, C> Value<'a, C> {
     /// Parses a str to a value.
     /// Returns `Err` if the string is not a valid value.
     pub fn parse_str(src: &'a str) -> Result<Self, ParseError> {
@@ -260,7 +261,7 @@ impl<'a> Value<'a> {
     /// Returns `Err` if the string is not a valid value.
     pub fn parse_str_with_custom(
         src: &'a str,
-        custom: impl Fn(&mut Chars<'a>) -> Result<Value<'a>, crate::ParseError>,
+        custom: impl Fn(&mut Chars<'a>) -> Result<Value<'a, C>, crate::ParseError>,
     ) -> Result<Self, ParseError> {
         let mut chars = Chars::new(src);
 

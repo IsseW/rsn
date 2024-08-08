@@ -268,7 +268,12 @@ pub struct ValueDeriveInput {
 }
 
 impl ValueDeriveInput {
-    pub fn from_input(input: &syn::DeriveInput, trait_ident: &str) -> syn::Result<Self> {
+    pub fn from_input(
+        input: &syn::DeriveInput,
+        trait_ident: &str,
+        flatten_named_trait_ident: &str,
+        flatten_unnamed_trait_ident: &str,
+    ) -> syn::Result<Self> {
         let attrs = ContainerAttrs::try_from(&input.attrs)?;
         let data = ValueData::from_data(&input.data)?;
 
@@ -601,7 +606,7 @@ impl ValueDeriveInput {
                 }
             }
 
-            let mut add_type_bound = |ty: &syn::Type| {
+            let mut add_type_bound = |ty: &syn::Type, trait_ident: &str| {
                 if skip_bound(ty, real_ident) {
                     return;
                 }
@@ -645,36 +650,39 @@ impl ValueDeriveInput {
                     }))
             };
 
-            let mut add_field_bounds = |fields: &syn::Fields| match fields {
-                syn::Fields::Named(fields) => {
-                    for field in fields.named.iter() {
-                        if FieldAttrs::try_from(&field.attrs)
-                            .map_or(true, |attrs| !attrs.skip_bound)
-                        {
-                            add_type_bound(&field.ty)
-                        }
+            let mut add_field_bounds = |fields: &ValueFields| match fields {
+                ValueFields::Named(fields) => {
+                    for (attrs, _, ty) in fields {
+                        let trait_ident = match attrs.modifier {
+                            None | Some(FieldModifier::Default) => trait_ident,
+                            Some(FieldModifier::Flatten) => flatten_named_trait_ident,
+                            Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => continue,
+                        };
+
+                        add_type_bound(ty, trait_ident)
                     }
                 }
-                syn::Fields::Unnamed(fields) => {
-                    for field in fields.unnamed.iter() {
-                        if FieldAttrs::try_from(&field.attrs)
-                            .map_or(true, |attrs| !attrs.skip_bound)
-                        {
-                            add_type_bound(&field.ty)
-                        }
+                ValueFields::Unnamed(fields) => {
+                    for (attrs, ty) in fields {
+                        let trait_ident = match attrs.modifier {
+                            None | Some(FieldModifier::Default) => trait_ident,
+                            Some(FieldModifier::Flatten) => flatten_unnamed_trait_ident,
+                            Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => continue,
+                        };
+
+                        add_type_bound(ty, trait_ident)
                     }
                 }
-                syn::Fields::Unit => {}
+                ValueFields::Unit => {}
             };
 
-            match &input.data {
-                syn::Data::Struct(fields) => add_field_bounds(&fields.fields),
-                syn::Data::Enum(variants) => {
-                    for variant in variants.variants.iter() {
-                        add_field_bounds(&variant.fields)
+            match &data {
+                ValueData::Struct(fields) => add_field_bounds(fields),
+                ValueData::Enum(variants) => {
+                    for (_, _, fields) in variants {
+                        add_field_bounds(fields)
                     }
                 }
-                syn::Data::Union(_) => {}
             }
         }
         let where_clause = modified_generics.where_clause.clone();

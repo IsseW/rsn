@@ -396,7 +396,7 @@ pub fn from_value(
                         |field_parse| {
                             Some(quote!(
                                 #[automatically_derived]
-                                impl #modified_generics  __rsn::ParseNamedFields<#meta_type, #custom_type> for #ident #generics #where_clause {
+                                impl #modified_generics  __rsn::ParseNamedFields<#meta_type, #custom_type> for #real_ident #generics #where_clause {
                                     fn parse_fields(span: __rsn::Span, fields: &mut __rsn::Fields<#custom_type>, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
                                         #field_parse
                                     }
@@ -423,7 +423,7 @@ pub fn from_value(
                         |parse_fields| {
                             Some(quote!(
                                 #[automatically_derived]
-                                impl #modified_generics __rsn::ParseUnnamedFields<#meta_type, #custom_type> for #ident #generics #where_clause {
+                                impl #modified_generics __rsn::ParseUnnamedFields<#meta_type, #custom_type> for #real_ident #generics #where_clause {
                                     fn parse_fields<'a, I: Iterator<Item = __rsn::Value<'a, #custom_type>>>(struct_span: __rsn::Span, iter: &mut I, parse_optional: bool, meta: &mut #meta_type) -> Result<Self, __rsn::FromValueError> {
                                         #parse_fields
                                     }
@@ -437,17 +437,26 @@ pub fn from_value(
                     quote!(
                         match value.inner() {
                             #reprs
-                            value => core::result::Result::Err(__rsn::FromValueError::new(span, #error::ExpectedPattern(&[#help_msg]))),
+                            value => ::core::result::Result::Err(__rsn::FromValueError::new(span, #error::ExpectedPattern(&[#help_msg]))),
                         }
                     )
                 }
                 ValueFields::Unit => {
-                    quote!(
-                        match value.inner() {
-                            __rsn::ValueKind::Path(path) if #check_path => core::result::Result::Ok(Self),
-                            value => core::result::Result::Err(__rsn::FromValueError::new(span, #error::ExpectedIdent(#ident_str))),
+                    if attrs.untagged.is_some() {
+                        quote! {
+                            match value.inner() {
+                                __rsn::ValueKind::Tuple(tuple) if tuple.is_empty() => ::core::result::Result::Ok(Self),
+                                value => ::core::result::Result::Err(__rsn::FromValueError::new(span, #error::ExpectedPattern(&["()"]))),
+                            }
                         }
-                    )
+                    } else {
+                        quote!(
+                            match value.inner() {
+                                __rsn::ValueKind::Path(path) if #check_path => ::core::result::Result::Ok(Self),
+                                value => ::core::result::Result::Err(__rsn::FromValueError::new(span, #error::ExpectedIdent(#ident_str))),
+                            }
+                        )
+                    }
                 }
             }
         }

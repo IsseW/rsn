@@ -14,7 +14,13 @@ mod util;
 #[proc_macro_derive(FromValue, attributes(rsn))]
 pub fn from_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let from_value = util::ValueDeriveInput::from_input(&input, "FromValue").and_then(|input| {
+    let from_value = util::ValueDeriveInput::from_input(
+        &input,
+        "FromValue",
+        "ParseNamedFields",
+        "ParseUnnamedFields",
+    )
+    .and_then(|input| {
         let fields = fields::derive_fields(&input)?;
         let from_value = from_value::from_value(input)?;
         Ok(quote! {
@@ -36,7 +42,13 @@ pub fn from_value(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(ToValue, attributes(rsn))]
 pub fn to_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let to_value = util::ValueDeriveInput::from_input(&input, "ToValue").and_then(|input| {
+    let to_value = util::ValueDeriveInput::from_input(
+        &input,
+        "ToValue",
+        "WriteNamedFields",
+        "WriteUnnamedFields",
+    )
+    .and_then(|input| {
         let fields = fields::derive_fields(&input)?;
         let to_value = to_value::to_value(input)?;
         Ok(quote! {

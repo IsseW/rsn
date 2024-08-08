@@ -21,7 +21,7 @@ pub trait ParseNamedFields<M, C>: NamedFields {
 }
 
 pub trait WriteNamedFields<M, C>: NamedFields {
-    fn write_fields(&self, struct_span: Span, fields: &mut Fields<C>, meta: &M);
+    fn write_fields(&self, fields: &mut Fields<C>, meta: &M);
 }
 
 pub trait UnnamedFields: Sized {
@@ -39,11 +39,5 @@ pub trait ParseUnnamedFields<M, C>: UnnamedFields {
 }
 
 pub trait WriteUnnamedFields<M, C>: UnnamedFields {
-    fn write_fields<'a, I: Iterator<Item = Value<'a, C>>>(
-        &self,
-        struct_span: Span,
-        fields: &mut I,
-        write_default: bool,
-        meta: &M,
-    );
+    fn write_fields<'a>(&'a self, fields: &mut Vec<Value<'a, C>>, write_default: bool, meta: &M);
 }

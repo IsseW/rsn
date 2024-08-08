@@ -372,6 +372,206 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
             },
         })
     };
+
+    fn lifetime_ident(i: u64) -> syn::Ident {
+        format_ident!("_rsn_lifetime{i}")
+    }
+
+    fn parameterize_type_lifetimes(ty: &syn::Type, i: &mut u64) -> syn::Result<syn::Type> {
+        fn par_return_type(ty: &syn::ReturnType, i: &mut u64) -> syn::Result<syn::ReturnType> {
+            Ok(match ty {
+                syn::ReturnType::Default => syn::ReturnType::Default,
+                syn::ReturnType::Type(arrow, ty) => {
+                    syn::ReturnType::Type(*arrow, Box::new(parameterize_type_lifetimes(ty, i)?))
+                }
+            })
+        }
+        fn par_lifetime(lifetime: &syn::Lifetime, i: &mut u64) -> syn::Lifetime {
+            if lifetime.ident == "_" {
+                let ident = lifetime_ident(*i);
+                *i += 1;
+                syn::Lifetime {
+                    ident,
+                    ..lifetime.clone()
+                }
+            } else {
+                lifetime.clone()
+            }
+        }
+        fn par_path(path: &syn::Path, i: &mut u64) -> syn::Result<syn::Path> {
+            Ok(syn::Path {
+                segments: syn::punctuated::Punctuated::from_iter(path.segments.iter().map(|segment| {
+                        syn::Result::Ok(syn::PathSegment {
+                            arguments: match &segment.arguments {
+                                syn::PathArguments::None => syn::PathArguments::None,
+                                syn::PathArguments::AngleBracketed(args) => syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    args: syn::punctuated::Punctuated::from_iter(args.args.iter().map(|arg| {
+                                        syn::Result::Ok(match arg {
+                                            syn::GenericArgument::Lifetime(lifetime) => {
+                                                syn::GenericArgument::Lifetime(par_lifetime(lifetime, i))
+                                            },
+                                            syn::GenericArgument::Type(ty) => syn::GenericArgument::Type(
+                                                parameterize_type_lifetimes(ty, i)?,
+                                            ),
+                                            syn::GenericArgument::Const(_) => arg.clone(),
+                                            syn::GenericArgument::Binding(binding) => {
+                                                syn::GenericArgument::Binding(syn::Binding {
+                                                    ty: parameterize_type_lifetimes(&binding.ty, i)?,
+                                                    ..binding.clone()
+                                                })
+                                            },
+                                            syn::GenericArgument::Constraint(constraint) => return Err(
+                                                syn::Error::new(
+                                                    constraint.span(),
+                                                    "Can't have type bound constraints in meta type",
+                                                ),
+                                            ),
+                                        })
+                                    }).try_collect::<Vec<_>>()?),
+                                    ..args.clone()
+                                }),
+                                syn::PathArguments::Parenthesized(args) => {
+                                    syn::PathArguments::Parenthesized(syn::ParenthesizedGenericArguments {
+                                        inputs: syn::punctuated::Punctuated::from_iter(
+                                            args
+                                                .inputs
+                                                .iter()
+                                                .map(|arg| parameterize_type_lifetimes(arg, i))
+                                                .try_collect::<Vec<_>>()?,
+                                        ),
+                                        output: par_return_type(&args.output, i)?,
+                                        ..args.clone()
+                                    })
+                                },
+                            },
+                            ..segment.clone()
+                        })
+                    }).try_collect::<Vec<_>>()?), ..path.clone() })
+        }
+        match ty {
+            syn::Type::Array(array) => Ok(syn::Type::Array(syn::TypeArray {
+                elem: Box::new(parameterize_type_lifetimes(&array.elem, i)?),
+                ..array.clone()
+            })),
+            syn::Type::BareFn(function) => Ok(syn::Type::BareFn(syn::TypeBareFn {
+                inputs: syn::punctuated::Punctuated::from_iter(
+                    function
+                        .inputs
+                        .iter()
+                        .map(|input| {
+                            syn::Result::Ok(syn::BareFnArg {
+                                ty: parameterize_type_lifetimes(&input.ty, i)?,
+                                ..input.clone()
+                            })
+                        })
+                        .try_collect::<Vec<_>>()?,
+                ),
+                output: par_return_type(&function.output, i)?,
+                ..function.clone()
+            })),
+            syn::Type::Group(group) => Ok(syn::Type::Group(syn::TypeGroup {
+                elem: Box::new(parameterize_type_lifetimes(&group.elem, i)?),
+                ..group.clone()
+            })),
+            syn::Type::ImplTrait(_) => Err(syn::Error::new(
+                ty.span(),
+                "Can't have impl trait in meta type",
+            )),
+            syn::Type::Infer(_) => Err(syn::Error::new(
+                ty.span(),
+                "Can't have inferred type in meta type",
+            )),
+            syn::Type::Macro(_) => Ok(ty.clone()),
+            syn::Type::Never(_) => Ok(ty.clone()),
+            syn::Type::Paren(paren) => Ok(syn::Type::Paren(syn::TypeParen {
+                elem: Box::new(parameterize_type_lifetimes(&paren.elem, i)?),
+                ..paren.clone()
+            })),
+            syn::Type::Path(path) => Ok(syn::Type::Path(syn::TypePath {
+                qself: path
+                    .qself
+                    .as_ref()
+                    .map(|qself| {
+                        syn::Result::Ok(syn::QSelf {
+                            ty: Box::new(parameterize_type_lifetimes(&qself.ty, i)?),
+                            ..qself.clone()
+                        })
+                    })
+                    .transpose()?,
+                path: par_path(&path.path, i)?,
+            })),
+            syn::Type::Ptr(ptr) => Ok(syn::Type::Ptr(syn::TypePtr {
+                elem: Box::new(parameterize_type_lifetimes(&ptr.elem, i)?),
+                ..ptr.clone()
+            })),
+            syn::Type::Reference(reference) => Ok(syn::Type::Reference(syn::TypeReference {
+                elem: Box::new(parameterize_type_lifetimes(&reference.elem, i)?),
+                ..reference.clone()
+            })),
+            syn::Type::Slice(slice) => Ok(syn::Type::Slice(syn::TypeSlice {
+                elem: Box::new(parameterize_type_lifetimes(&slice.elem, i)?),
+                ..slice.clone()
+            })),
+            // TODO: This should check for lifetimes in the trait too.
+            syn::Type::TraitObject(object) => Ok(syn::Type::TraitObject(syn::TypeTraitObject {
+                bounds: syn::punctuated::Punctuated::from_iter(
+                    object
+                        .bounds
+                        .iter()
+                        .map(|bound| {
+                            syn::Result::Ok(match bound {
+                                syn::TypeParamBound::Trait(tra) => {
+                                    syn::TypeParamBound::Trait(syn::TraitBound {
+                                        path: par_path(&tra.path, i)?,
+                                        ..tra.clone()
+                                    })
+                                }
+                                syn::TypeParamBound::Lifetime(lifetime) => {
+                                    syn::TypeParamBound::Lifetime(par_lifetime(lifetime, i))
+                                }
+                            })
+                        })
+                        .try_collect::<Vec<_>>()?,
+                ),
+                ..object.clone()
+            })),
+            syn::Type::Tuple(tuple) => Ok(syn::Type::Tuple(syn::TypeTuple {
+                elems: syn::punctuated::Punctuated::from_iter(
+                    tuple
+                        .elems
+                        .iter()
+                        .map(|elem| parameterize_type_lifetimes(elem, i))
+                        .try_collect::<Vec<_>>()?,
+                ),
+                ..tuple.clone()
+            })),
+            syn::Type::Verbatim(_) => todo!(),
+            _ => todo!(),
+        }
+    }
+
+    let mut lifetime_count = 0;
+    let parameterized_meta = parameterize_type_lifetimes(&meta_type, &mut lifetime_count)?;
+    let lifetimes = (0..lifetime_count)
+        .map(|i| syn::Lifetime {
+            apostrophe: meta_type.span(),
+            ident: lifetime_ident(i),
+        })
+        .collect::<Vec<_>>();
+    let meta_bound_lifetimes = syn::BoundLifetimes {
+        for_token: syn::Token![for](meta_type.span()),
+        lt_token: syn::Token![<](meta_type.span()),
+        lifetimes: syn::punctuated::Punctuated::from_iter(lifetimes.iter().map(|lifetime| {
+            syn::LifetimeDef {
+                attrs: Vec::new(),
+                lifetime: lifetime.clone(),
+                colon_token: None,
+                bounds: syn::punctuated::Punctuated::new(),
+            }
+        })),
+        gt_token: syn::Token![>](meta_type.span()),
+    };
+
     for param in &mut generics_bounds.params {
         if let syn::GenericParam::Type(param) = param {
             param
@@ -379,7 +579,7 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                 .push(syn::TypeParamBound::Trait(syn::TraitBound {
                     paren_token: None,
                     modifier: syn::TraitBoundModifier::None,
-                    lifetimes: None,
+                    lifetimes: Some(meta_bound_lifetimes.clone()),
                     path: syn::Path {
                         leading_colon: None,
                         segments: syn::punctuated::Punctuated::from_iter([
@@ -391,7 +591,7 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                                         colon2_token: None,
                                         lt_token: syn::Token![<](param.span()),
                                         args: syn::punctuated::Punctuated::from_iter([
-                                            syn::GenericArgument::Type(meta_type.clone()),
+                                            syn::GenericArgument::Type(parameterized_meta.clone()),
                                             syn::GenericArgument::Type(custom_type.clone()),
                                         ]),
                                         gt_token: syn::Token![>](param.span()),
@@ -481,7 +681,7 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                         syn::TraitBound {
                             paren_token: None,
                             modifier: syn::TraitBoundModifier::None,
-                            lifetimes: None,
+                            lifetimes: Some(meta_bound_lifetimes.clone()),
                             path: syn::Path {
                                 leading_colon: None,
                                 segments: syn::punctuated::Punctuated::from_iter([
@@ -493,7 +693,9 @@ pub fn from_value(input: &DeriveInput) -> syn::Result<TokenStream> {
                                                 colon2_token: None,
                                                 lt_token: syn::Token![<](ty.span()),
                                                 args: syn::punctuated::Punctuated::from_iter([
-                                                    syn::GenericArgument::Type(meta_type.clone()),
+                                                    syn::GenericArgument::Type(
+                                                        parameterized_meta.clone(),
+                                                    ),
                                                     syn::GenericArgument::Type(custom_type.clone()),
                                                 ]),
                                                 gt_token: syn::Token![>](ty.span()),

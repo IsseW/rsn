@@ -1,7 +1,8 @@
+#[allow(dead_code)]
 pub enum ContainerAttr {
     Untagged(syn::Ident),
     Rename(syn::Ident, syn::Token![=], syn::Ident),
-   WithMeta(syn::Ident, syn::Token![=], syn::Type),
+    WithMeta(syn::Ident, syn::Token![=], syn::Type),
     WithCustom(syn::Ident, syn::Token![=], syn::Type),
 }
 

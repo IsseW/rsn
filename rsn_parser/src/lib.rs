@@ -1,4 +1,4 @@
-#![feature(iter_collect_into)]
+#![feature(iter_collect_into, never_type)]
 use std::{borrow::Cow, fmt::Display, ops::RangeInclusive, str::CharIndices};
 
 use spanned::{Position, Span, Spanned};

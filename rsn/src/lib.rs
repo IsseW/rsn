@@ -4,7 +4,8 @@
     iterator_try_collect,
     iter_collect_into,
     specialization,
-    const_trait_impl
+    const_trait_impl,
+    never_type
 )]
 
 mod from_value;
@@ -44,14 +45,11 @@ impl Display for FullError {
 
 impl std::error::Error for FullError {}
 
-pub fn de<'a, T: FromValue<(), &'a str>>(src: &'a str) -> Result<T, FullError> {
+pub fn de<T: FromValue<(), !>>(src: &str) -> Result<T, FullError> {
     de_with_meta(src, &mut ())
 }
 
-pub fn de_with_meta<'a, M, T: FromValue<M, &'a str>>(
-    src: &'a str,
-    meta: &mut M,
-) -> Result<T, FullError> {
+pub fn de_with_meta<M, T: FromValue<M, !>>(src: &str, meta: &mut M) -> Result<T, FullError> {
     Value::parse_str(src)
         .map_err(|e| {
             let mut err = e.display_in_src(src);
@@ -83,7 +81,7 @@ mod tests {
     use super::from_value::FromValue;
     use super::*;
 
-    type Value<'a> = crate::Value<'a, &'a str>;
+    type Value<'a> = crate::Value<'a, !>;
 
     #[test]
     fn test_parse() {

@@ -123,7 +123,7 @@ impl<'a> From<Spanned<&'a str>> for Path<'a> {
 }
 
 #[derive(Clone, Debug)]
-pub enum ValueKind<'a, C = &'a str> {
+pub enum ValueKind<'a, C = !> {
     Integer(i128),
     Float(f64),
     Bool(bool),
@@ -244,7 +244,7 @@ impl<'a, C: Display> Display for ValueKind<'a, C> {
     }
 }
 
-pub type Value<'a, C = &'a str> = Spanned<ValueKind<'a, C>>;
+pub type Value<'a, C = !> = Spanned<ValueKind<'a, C>>;
 
 fn no_custom<'a, C>(chars: &mut Chars<'a>) -> Result<Value<'a, C>, ParseError> {
     Err(chars.error1(crate::Error::UnexpectedSymbol))

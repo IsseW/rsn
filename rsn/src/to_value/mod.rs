@@ -9,6 +9,8 @@ use rsn_derive::rsn;
 
 use crate::{AnyRange, Path, Spanned, Value, ValueKind};
 
+pub mod default;
+
 pub trait ToValue<M, C> {
     fn to_value(&self, meta: &M) -> Value<C>;
 }

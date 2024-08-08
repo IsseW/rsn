@@ -1,3 +1,6 @@
+use quote::format_ident;
+use syn::{punctuated::Punctuated, spanned::Spanned};
+
 #[allow(dead_code)]
 pub enum ContainerAttr {
     Untagged(syn::Ident),
@@ -178,5 +181,514 @@ impl TryFrom<&Vec<syn::Attribute>> for FieldAttrs {
             }
         }
         Ok(this)
+    }
+}
+
+pub type ValueNamedFields = Vec<(FieldAttrs, syn::Ident, syn::Type)>;
+pub type ValueUnnamedFields = Vec<(FieldAttrs, syn::Type)>;
+pub enum ValueFields {
+    Unit,
+    Unnamed(ValueUnnamedFields),
+    Named(ValueNamedFields),
+}
+
+impl ValueFields {
+    pub fn from_fields(fields: &syn::Fields) -> syn::Result<Self> {
+        match fields {
+            syn::Fields::Named(fields) => Ok(ValueFields::Named(
+                fields
+                    .named
+                    .iter()
+                    .map(|field| {
+                        syn::Result::Ok((
+                            FieldAttrs::try_from(&field.attrs)?,
+                            field.ident.as_ref().unwrap().clone(),
+                            field.ty.clone(),
+                        ))
+                    })
+                    .try_collect()?,
+            )),
+            syn::Fields::Unnamed(fields) => Ok(ValueFields::Unnamed(
+                fields
+                    .unnamed
+                    .iter()
+                    .map(|field| {
+                        syn::Result::Ok((FieldAttrs::try_from(&field.attrs)?, field.ty.clone()))
+                    })
+                    .try_collect()?,
+            )),
+            syn::Fields::Unit => Ok(ValueFields::Unit),
+        }
+    }
+}
+
+pub type ValueVariants = Vec<(ContainerAttrs, syn::Ident, ValueFields)>;
+pub enum ValueData {
+    Struct(ValueFields),
+    Enum(ValueVariants),
+}
+
+impl ValueData {
+    pub fn from_data(data: &syn::Data) -> syn::Result<Self> {
+        match data {
+            syn::Data::Struct(data) => {
+                Ok(ValueData::Struct(ValueFields::from_fields(&data.fields)?))
+            }
+            syn::Data::Enum(data) => Ok(ValueData::Enum(
+                data.variants
+                    .iter()
+                    .map(|variant| {
+                        syn::Result::Ok((
+                            ContainerAttrs::try_from(&variant.attrs)?,
+                            variant.ident.clone(),
+                            ValueFields::from_fields(&variant.fields)?,
+                        ))
+                    })
+                    .try_collect()?,
+            )),
+            syn::Data::Union(data) => Err(syn::Error::new(
+                data.union_token.span,
+                "Unions aren't supported",
+            )),
+        }
+    }
+}
+
+pub struct ValueDeriveInput {
+    pub attrs: ContainerAttrs,
+    pub data: ValueData,
+    pub ident: syn::Ident,
+    pub real_ident: syn::Ident,
+    pub ident_str: String,
+    pub generics: syn::Generics,
+    pub modified_generics: syn::Generics,
+    pub where_clause: Option<syn::WhereClause>,
+    pub meta_type: syn::Type,
+    pub custom_type: syn::Type,
+}
+
+impl ValueDeriveInput {
+    pub fn from_input(input: &syn::DeriveInput, trait_ident: &str) -> syn::Result<Self> {
+        let attrs = ContainerAttrs::try_from(&input.attrs)?;
+        let data = ValueData::from_data(&input.data)?;
+
+        let real_ident = &input.ident;
+        let ident = attrs.rename.as_ref().unwrap_or(real_ident);
+        let ident_str = ident.to_string();
+        let generics = &input.generics;
+
+        let mut modified_generics = generics.clone();
+        let meta_type = if let Some(ty) = attrs.with_meta.clone() {
+            ty
+        } else {
+            syn::Type::Path(syn::TypePath {
+                qself: None,
+                path: syn::Path {
+                    leading_colon: None,
+                    segments: Punctuated::from_iter([syn::PathSegment::from(format_ident!(
+                        "_Rsn_Meta"
+                    ))]),
+                },
+            })
+        };
+        let custom_type = if let Some(ty) = attrs.with_custom.clone() {
+            ty
+        } else {
+            syn::Type::Path(syn::TypePath {
+                qself: None,
+                path: syn::Path {
+                    leading_colon: None,
+                    segments: Punctuated::from_iter([syn::PathSegment::from(format_ident!(
+                        "_Rsn_CustomType"
+                    ))]),
+                },
+            })
+        };
+
+        fn lifetime_ident(i: u64) -> syn::Ident {
+            format_ident!("_rsn_lifetime{i}")
+        }
+
+        fn parameterize_type_lifetimes(ty: &syn::Type, i: &mut u64) -> syn::Result<syn::Type> {
+            fn par_return_type(ty: &syn::ReturnType, i: &mut u64) -> syn::Result<syn::ReturnType> {
+                Ok(match ty {
+                    syn::ReturnType::Default => syn::ReturnType::Default,
+                    syn::ReturnType::Type(arrow, ty) => {
+                        syn::ReturnType::Type(*arrow, Box::new(parameterize_type_lifetimes(ty, i)?))
+                    }
+                })
+            }
+            fn par_lifetime(lifetime: &syn::Lifetime, i: &mut u64) -> syn::Lifetime {
+                if lifetime.ident == "_" {
+                    let ident = lifetime_ident(*i);
+                    *i += 1;
+                    syn::Lifetime {
+                        ident,
+                        ..lifetime.clone()
+                    }
+                } else {
+                    lifetime.clone()
+                }
+            }
+            fn par_path(path: &syn::Path, i: &mut u64) -> syn::Result<syn::Path> {
+                Ok(syn::Path {
+                segments: Punctuated::from_iter(path.segments.iter().map(|segment| {
+                        syn::Result::Ok(syn::PathSegment {
+                            arguments: match &segment.arguments {
+                                syn::PathArguments::None => syn::PathArguments::None,
+                                syn::PathArguments::AngleBracketed(args) => syn::PathArguments::AngleBracketed(syn::AngleBracketedGenericArguments {
+                                    args: Punctuated::from_iter(args.args.iter().map(|arg| {
+                                        syn::Result::Ok(match arg {
+                                            syn::GenericArgument::Lifetime(lifetime) => {
+                                                syn::GenericArgument::Lifetime(par_lifetime(lifetime, i))
+                                            },
+                                            syn::GenericArgument::Type(ty) => syn::GenericArgument::Type(
+                                                parameterize_type_lifetimes(ty, i)?,
+                                            ),
+                                            syn::GenericArgument::Const(_) => arg.clone(),
+                                            syn::GenericArgument::Binding(binding) => {
+                                                syn::GenericArgument::Binding(syn::Binding {
+                                                    ty: parameterize_type_lifetimes(&binding.ty, i)?,
+                                                    ..binding.clone()
+                                                })
+                                            },
+                                            syn::GenericArgument::Constraint(constraint) => return Err(
+                                                syn::Error::new(
+                                                    constraint.span(),
+                                                    "Can't have type bound constraints in meta type",
+                                                ),
+                                            ),
+                                        })
+                                    }).try_collect::<Vec<_>>()?),
+                                    ..args.clone()
+                                }),
+                                syn::PathArguments::Parenthesized(args) => {
+                                    syn::PathArguments::Parenthesized(syn::ParenthesizedGenericArguments {
+                                        inputs: Punctuated::from_iter(
+                                            args
+                                                .inputs
+                                                .iter()
+                                                .map(|arg| parameterize_type_lifetimes(arg, i))
+                                                .try_collect::<Vec<_>>()?,
+                                        ),
+                                        output: par_return_type(&args.output, i)?,
+                                        ..args.clone()
+                                    })
+                                },
+                            },
+                            ..segment.clone()
+                        })
+                    }).try_collect::<Vec<_>>()?), ..path.clone() })
+            }
+            match ty {
+                syn::Type::Array(array) => Ok(syn::Type::Array(syn::TypeArray {
+                    elem: Box::new(parameterize_type_lifetimes(&array.elem, i)?),
+                    ..array.clone()
+                })),
+                syn::Type::BareFn(function) => Ok(syn::Type::BareFn(syn::TypeBareFn {
+                    inputs: Punctuated::from_iter(
+                        function
+                            .inputs
+                            .iter()
+                            .map(|input| {
+                                syn::Result::Ok(syn::BareFnArg {
+                                    ty: parameterize_type_lifetimes(&input.ty, i)?,
+                                    ..input.clone()
+                                })
+                            })
+                            .try_collect::<Vec<_>>()?,
+                    ),
+                    output: par_return_type(&function.output, i)?,
+                    ..function.clone()
+                })),
+                syn::Type::Group(group) => Ok(syn::Type::Group(syn::TypeGroup {
+                    elem: Box::new(parameterize_type_lifetimes(&group.elem, i)?),
+                    ..group.clone()
+                })),
+                syn::Type::ImplTrait(_) => Err(syn::Error::new(
+                    ty.span(),
+                    "Can't have impl trait in meta type",
+                )),
+                syn::Type::Infer(_) => Err(syn::Error::new(
+                    ty.span(),
+                    "Can't have inferred type in meta type",
+                )),
+                syn::Type::Macro(_) => Ok(ty.clone()),
+                syn::Type::Never(_) => Ok(ty.clone()),
+                syn::Type::Paren(paren) => Ok(syn::Type::Paren(syn::TypeParen {
+                    elem: Box::new(parameterize_type_lifetimes(&paren.elem, i)?),
+                    ..paren.clone()
+                })),
+                syn::Type::Path(path) => Ok(syn::Type::Path(syn::TypePath {
+                    qself: path
+                        .qself
+                        .as_ref()
+                        .map(|qself| {
+                            syn::Result::Ok(syn::QSelf {
+                                ty: Box::new(parameterize_type_lifetimes(&qself.ty, i)?),
+                                ..qself.clone()
+                            })
+                        })
+                        .transpose()?,
+                    path: par_path(&path.path, i)?,
+                })),
+                syn::Type::Ptr(ptr) => Ok(syn::Type::Ptr(syn::TypePtr {
+                    elem: Box::new(parameterize_type_lifetimes(&ptr.elem, i)?),
+                    ..ptr.clone()
+                })),
+                syn::Type::Reference(reference) => Ok(syn::Type::Reference(syn::TypeReference {
+                    elem: Box::new(parameterize_type_lifetimes(&reference.elem, i)?),
+                    ..reference.clone()
+                })),
+                syn::Type::Slice(slice) => Ok(syn::Type::Slice(syn::TypeSlice {
+                    elem: Box::new(parameterize_type_lifetimes(&slice.elem, i)?),
+                    ..slice.clone()
+                })),
+                // TODO: This should check for lifetimes in the trait too.
+                syn::Type::TraitObject(object) => {
+                    Ok(syn::Type::TraitObject(syn::TypeTraitObject {
+                        bounds: Punctuated::from_iter(
+                            object
+                                .bounds
+                                .iter()
+                                .map(|bound| {
+                                    syn::Result::Ok(match bound {
+                                        syn::TypeParamBound::Trait(tra) => {
+                                            syn::TypeParamBound::Trait(syn::TraitBound {
+                                                path: par_path(&tra.path, i)?,
+                                                ..tra.clone()
+                                            })
+                                        }
+                                        syn::TypeParamBound::Lifetime(lifetime) => {
+                                            syn::TypeParamBound::Lifetime(par_lifetime(lifetime, i))
+                                        }
+                                    })
+                                })
+                                .try_collect::<Vec<_>>()?,
+                        ),
+                        ..object.clone()
+                    }))
+                }
+                syn::Type::Tuple(tuple) => Ok(syn::Type::Tuple(syn::TypeTuple {
+                    elems: Punctuated::from_iter(
+                        tuple
+                            .elems
+                            .iter()
+                            .map(|elem| parameterize_type_lifetimes(elem, i))
+                            .try_collect::<Vec<_>>()?,
+                    ),
+                    ..tuple.clone()
+                })),
+                syn::Type::Verbatim(_) => todo!(),
+                _ => todo!(),
+            }
+        }
+
+        let mut lifetime_count = 0;
+        let parameterized_meta_type = parameterize_type_lifetimes(&meta_type, &mut lifetime_count)?;
+        let lifetimes = (0..lifetime_count)
+            .map(|i| syn::Lifetime {
+                apostrophe: meta_type.span(),
+                ident: lifetime_ident(i),
+            })
+            .collect::<Vec<_>>();
+        let meta_bound_lifetimes = syn::BoundLifetimes {
+            for_token: syn::Token![for](meta_type.span()),
+            lt_token: syn::Token![<](meta_type.span()),
+            lifetimes: Punctuated::from_iter(lifetimes.iter().map(|lifetime| syn::LifetimeDef {
+                attrs: Vec::new(),
+                lifetime: lifetime.clone(),
+                colon_token: None,
+                bounds: Punctuated::new(),
+            })),
+            gt_token: syn::Token![>](meta_type.span()),
+        };
+
+        for param in &mut modified_generics.params {
+            if let syn::GenericParam::Type(param) = param {
+                param
+                    .bounds
+                    .push(syn::TypeParamBound::Trait(syn::TraitBound {
+                        paren_token: None,
+                        modifier: syn::TraitBoundModifier::None,
+                        lifetimes: Some(meta_bound_lifetimes.clone()),
+                        path: syn::Path {
+                            leading_colon: None,
+                            segments: Punctuated::from_iter([
+                                syn::PathSegment::from(format_ident!("__rsn")),
+                                syn::PathSegment {
+                                    ident: format_ident!("{trait_ident}"),
+                                    arguments: syn::PathArguments::AngleBracketed(
+                                        syn::AngleBracketedGenericArguments {
+                                            colon2_token: None,
+                                            lt_token: syn::Token![<](param.span()),
+                                            args: Punctuated::from_iter([
+                                                syn::GenericArgument::Type(
+                                                    parameterized_meta_type.clone(),
+                                                ),
+                                                syn::GenericArgument::Type(custom_type.clone()),
+                                            ]),
+                                            gt_token: syn::Token![>](param.span()),
+                                        },
+                                    ),
+                                },
+                            ]),
+                        },
+                    }))
+            }
+        }
+
+        if attrs.with_meta.is_none() || attrs.with_custom.is_none() {
+            if attrs.with_meta.is_none() {
+                modified_generics
+                    .params
+                    .push(syn::GenericParam::Type(syn::TypeParam {
+                        attrs: Vec::new(),
+                        ident: format_ident!("_Rsn_Meta"),
+                        colon_token: None,
+                        bounds: Punctuated::new(),
+                        eq_token: None,
+                        default: None,
+                    }));
+            }
+            if attrs.with_custom.is_none() {
+                modified_generics
+                    .params
+                    .push(syn::GenericParam::Type(syn::TypeParam {
+                        attrs: Vec::new(),
+                        ident: format_ident!("_Rsn_CustomType"),
+                        colon_token: None,
+                        bounds: Punctuated::new(),
+                        eq_token: None,
+                        default: None,
+                    }));
+            }
+            let where_clause = modified_generics.make_where_clause();
+
+            fn skip_bound(ty: &syn::Type, ident: &syn::Ident) -> bool {
+                match ty {
+                    syn::Type::Array(arr) => skip_bound(&arr.elem, ident),
+                    syn::Type::BareFn(_) => false,
+                    syn::Type::Group(ty) => skip_bound(&ty.elem, ident),
+                    syn::Type::ImplTrait(_) => false,
+                    syn::Type::Infer(_) => false,
+                    syn::Type::Macro(_) => false,
+                    syn::Type::Never(_) => false,
+                    syn::Type::Paren(ty) => skip_bound(&ty.elem, ident),
+                    syn::Type::Path(path) => {
+                        path.path.is_ident(ident)
+                            || path
+                                .path
+                                .segments
+                                .last()
+                                .map_or(true, |l| match &l.arguments {
+                                    syn::PathArguments::AngleBracketed(args) => {
+                                        args.args.iter().any(|arg| match arg {
+                                            syn::GenericArgument::Type(ty) => skip_bound(ty, ident),
+                                            _ => false,
+                                        })
+                                    }
+                                    _ => false,
+                                })
+                    }
+                    syn::Type::Ptr(_) => false,
+                    syn::Type::Reference(_) => false,
+                    syn::Type::Slice(_) => false,
+                    syn::Type::TraitObject(_) => false,
+                    syn::Type::Tuple(tuple) => tuple.elems.iter().any(|ty| skip_bound(ty, ident)),
+                    syn::Type::Verbatim(_) => false,
+                    _ => todo!(),
+                }
+            }
+
+            let mut add_type_bound = |ty: &syn::Type| {
+                if skip_bound(ty, real_ident) {
+                    return;
+                }
+                where_clause
+                    .predicates
+                    .push(syn::WherePredicate::Type(syn::PredicateType {
+                        lifetimes: None,
+                        bounded_ty: ty.clone(),
+                        colon_token: syn::Token![:](ty.span()),
+                        bounds: Punctuated::from_iter([syn::TypeParamBound::Trait(
+                            syn::TraitBound {
+                                paren_token: None,
+                                modifier: syn::TraitBoundModifier::None,
+                                lifetimes: Some(meta_bound_lifetimes.clone()),
+                                path: syn::Path {
+                                    leading_colon: None,
+                                    segments: Punctuated::from_iter([
+                                        syn::PathSegment::from(format_ident!("__rsn")),
+                                        syn::PathSegment {
+                                            ident: format_ident!("{trait_ident}"),
+                                            arguments: syn::PathArguments::AngleBracketed(
+                                                syn::AngleBracketedGenericArguments {
+                                                    colon2_token: None,
+                                                    lt_token: syn::Token![<](ty.span()),
+                                                    args: Punctuated::from_iter([
+                                                        syn::GenericArgument::Type(
+                                                            parameterized_meta_type.clone(),
+                                                        ),
+                                                        syn::GenericArgument::Type(
+                                                            custom_type.clone(),
+                                                        ),
+                                                    ]),
+                                                    gt_token: syn::Token![>](ty.span()),
+                                                },
+                                            ),
+                                        },
+                                    ]),
+                                },
+                            },
+                        )]),
+                    }))
+            };
+
+            let mut add_field_bounds = |fields: &syn::Fields| match fields {
+                syn::Fields::Named(fields) => {
+                    for field in fields.named.iter() {
+                        if FieldAttrs::try_from(&field.attrs)
+                            .map_or(true, |attrs| !attrs.skip_bound)
+                        {
+                            add_type_bound(&field.ty)
+                        }
+                    }
+                }
+                syn::Fields::Unnamed(fields) => {
+                    for field in fields.unnamed.iter() {
+                        if FieldAttrs::try_from(&field.attrs)
+                            .map_or(true, |attrs| !attrs.skip_bound)
+                        {
+                            add_type_bound(&field.ty)
+                        }
+                    }
+                }
+                syn::Fields::Unit => {}
+            };
+
+            match &input.data {
+                syn::Data::Struct(fields) => add_field_bounds(&fields.fields),
+                syn::Data::Enum(variants) => {
+                    for variant in variants.variants.iter() {
+                        add_field_bounds(&variant.fields)
+                    }
+                }
+                syn::Data::Union(_) => {}
+            }
+        }
+        let where_clause = modified_generics.where_clause.clone();
+        Ok(Self {
+            ident: ident.clone(),
+            data,
+            ident_str,
+            real_ident: real_ident.clone(),
+            generics: generics.clone(),
+            modified_generics: modified_generics.clone(),
+            where_clause,
+            meta_type,
+            custom_type,
+            attrs,
+        })
     }
 }

@@ -18,10 +18,11 @@ pub use rsn_parser::{
     value::{Fields, Map, Path, Value, ValueKind},
     Error, ParseError,
 };
-pub use to_value::ToValue;
+pub use to_value::{default::IsDefault, ToValue};
 
 pub use from_value::flatten::{
-    NamedFields, ParseNamedFields, ParseUnnamedFields, UnnamedFields, __types,
+    NamedFields, ParseNamedFields, ParseUnnamedFields, UnnamedFields, WriteNamedFields,
+    WriteUnnamedFields, __types,
 };
 
 #[cfg(feature = "derive")]

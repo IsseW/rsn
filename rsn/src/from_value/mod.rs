@@ -12,8 +12,9 @@ use std::{
 };
 
 use arrayvec::ArrayVec;
+use rsn_parser::spanned::Span;
 
-use crate::{Spanned, ValueKind};
+use crate::{ParseUnnamedFields, Spanned, UnnamedFields, ValueKind};
 
 use super::Value;
 
@@ -22,6 +23,7 @@ pub enum Error {
     MissingField(&'static str),
     ExpectedIdent(&'static str),
     UnexpectedIdent,
+    UnexpectedField,
     ExpectedAmountOfElements(RangeInclusive<usize>),
     ExpectedType(&'static str),
     ExpectedPattern(&'static [&'static str]),
@@ -34,6 +36,7 @@ impl Display for Error {
             Error::MissingField(field) => write!(f, "Missing field {field}"),
             Error::ExpectedIdent(ident) => write!(f, "Expected {ident}"),
             Error::UnexpectedIdent => write!(f, "Unexpected ident"),
+            Error::UnexpectedField => write!(f, "Unexpected field"),
             Error::ExpectedAmountOfElements(range) => {
                 if range.start() == range.end() {
                     write!(f, "Expected {} elements", range.start())
@@ -446,6 +449,29 @@ impl<M, C> FromValue<M, C> for Tuple {
                 Error::ExpectedPattern(&["(<value>, <value>, ...)"]),
             )),
         }
+    }
+}
+
+#[impl_trait_for_tuples::impl_for_tuples(1, 16)]
+impl UnnamedFields for Tuple {
+    const MIN_FIELDS: usize = for_tuples!( #(1)+* );
+    const MAX_FIELDS: usize = Self::MIN_FIELDS;
+}
+
+#[impl_trait_for_tuples::impl_for_tuples(1, 16)]
+impl<M, C> ParseUnnamedFields<M, C> for Tuple {
+    for_tuples!(where #(Tuple: FromValue<M, C>),*);
+    fn parse_fields<'a, I: Iterator<Item = Value<'a, C>>>(
+        struct_span: Span,
+        fields: &mut I,
+        _parse_default: bool,
+        meta: &mut M,
+    ) -> Result<Self, FromValueError> {
+        Ok(for_tuples!(
+            (
+                #(Tuple::from_value(fields.next().ok_or(FromValueError::new(struct_span, Error::ExpectedAmountOfElements(Self::MIN_FIELDS..=Self::MAX_FIELDS)))?, meta)?),*
+            )
+        ))
     }
 }
 

@@ -5,7 +5,8 @@
     iter_collect_into,
     specialization,
     const_trait_impl,
-    never_type
+    never_type,
+    ptr_metadata
 )]
 
 mod from_value;

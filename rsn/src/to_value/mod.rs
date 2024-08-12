@@ -7,25 +7,33 @@ use std::{
 use arrayvec::ArrayVec;
 use rsn_derive::rsn;
 
-use crate::{AnyRange, Path, Spanned, Value, ValueKind};
+use crate::{AnyRange, Path, Spanned, UnnamedFields, Value, ValueKind, WriteUnnamedFields};
 
 pub mod default;
 
 pub trait ToValue<M, C> {
-    fn to_value(&self, meta: &M) -> Value<C>;
+    fn to_value<'a>(&'a self, meta: &'a M) -> Value<'a, C>
+    where
+        C: 'a;
 }
 
 impl<'a, M, C> ToValue<M, C> for Value<'a, C>
 where
     C: Clone,
 {
-    fn to_value(&self, _meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, _meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         self.clone()
     }
 }
 
 impl<'a, M, C, T: ToValue<M, C>> ToValue<M, C> for &'a T {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         T::to_value(*self, meta)
     }
 }
@@ -35,7 +43,7 @@ macro_rules! int_to_value {
         $(
         impl<M, C> ToValue<M, C> for $ty {
             #[allow(unused_comparisons)]
-            fn to_value(&self, _meta: &M) -> Value<C> {
+            fn to_value<'v>(&'v self, _meta: &'v M) -> Value<'v, C> where C: 'v {
                 if *self == Self::MAX {
                     Spanned::create(ValueKind::Path(Path { leading: false, idents: vec![Spanned::create("MAX")] }))
                 } else if *self < 0 && *self == Self::MIN {
@@ -67,7 +75,7 @@ macro_rules! float_to_value {
     ($($ty:ty),*$(,)?) => {
         $(
         impl<M, C> ToValue<M, C> for $ty {
-            fn to_value(&self, _meta: &M) -> Value<C> {
+            fn to_value<'v>(&'v self, _meta: &'v M) -> Value<'v, C> where C: 'v {
                 Spanned::create(ValueKind::Float(*self as _))
             }
         }
@@ -78,7 +86,10 @@ macro_rules! float_to_value {
 float_to_value!(f32, f64);
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for Range<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let start = &self.start;
         let end = &self.end;
 
@@ -89,7 +100,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for Range<T> {
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeInclusive<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let start = self.start();
         let end = self.end();
 
@@ -100,7 +114,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeInclusive<T> {
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeFrom<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let start = &self.start;
 
         rsn! {@(meta) =>
@@ -110,7 +127,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeFrom<T> {
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeTo<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let end = &self.end;
 
         rsn! {@(meta) =>
@@ -120,7 +140,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeTo<T> {
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeToInclusive<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let end = &self.end;
 
         rsn! {@(meta) =>
@@ -130,7 +153,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for RangeToInclusive<T> {
 }
 
 impl<M, C> ToValue<M, C> for RangeFull {
-    fn to_value(&self, _meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, _meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         rsn! {@(meta) =>
             ..
         }
@@ -138,7 +164,10 @@ impl<M, C> ToValue<M, C> for RangeFull {
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for [T] {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let this = self;
         rsn! {@(meta) =>
             #[#this]*
@@ -147,7 +176,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for [T] {
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for AnyRange<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         match self {
             AnyRange::Range(r) => r.to_value(meta),
             AnyRange::RangeInclusive(r) => r.to_value(meta),
@@ -160,19 +192,28 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for AnyRange<T> {
 }
 
 impl<M, C, T: ToValue<M, C>, const N: usize> ToValue<M, C> for [T; N] {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         self.as_slice().to_value(meta)
     }
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for Vec<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         self.as_slice().to_value(meta)
     }
 }
 
 impl<M, C, T: ToValue<M, C>, const N: usize> ToValue<M, C> for ArrayVec<T, N> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         self.as_slice().to_value(meta)
     }
 }
@@ -182,7 +223,10 @@ where
     K: ToValue<M, C> + Hash + Eq,
     V: ToValue<M, C>,
 {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let keys = self.keys();
         let values = self.values();
         rsn! {@(meta) =>
@@ -192,7 +236,10 @@ where
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for HashSet<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let this = self;
         rsn! {@(meta) =>
             #[#this]*
@@ -202,7 +249,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for HashSet<T> {
 
 #[impl_trait_for_tuples::impl_for_tuples(1, 16)]
 impl<M, C> ToValue<M, C> for Tuple {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         let values = [for_tuples!(#(Tuple::to_value(&self.Tuple, meta)),*)];
         let values = values.into_iter().collect();
 
@@ -210,8 +260,23 @@ impl<M, C> ToValue<M, C> for Tuple {
     }
 }
 
+#[impl_trait_for_tuples::impl_for_tuples(1, 16)]
+impl<M, C> WriteUnnamedFields<M, C> for Tuple {
+    for_tuples!(where #(Tuple: ToValue<M, C>),*);
+    fn write_fields<'a>(&'a self, fields: &mut Vec<Value<'a, C>>, _write_default: bool, meta: &'a M)
+    where
+        C: 'a,
+    {
+        fields.reserve(<Self as UnnamedFields>::MIN_FIELDS);
+        for_tuples!(#(fields.push(Tuple::to_value(&self.Tuple, meta));)*);
+    }
+}
+
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for Option<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         match self {
             Some(value) => rsn! {@(meta) =>
                 Some(#value)
@@ -222,7 +287,10 @@ impl<M, C, T: ToValue<M, C>> ToValue<M, C> for Option<T> {
 }
 
 impl<M, C> ToValue<M, C> for bool {
-    fn to_value(&self, #[allow(unused_variables)] meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, #[allow(unused_variables)] meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         if *self {
             rsn! {@(meta) => true }
         } else {
@@ -232,35 +300,53 @@ impl<M, C> ToValue<M, C> for bool {
 }
 
 impl<M, C> ToValue<M, C> for () {
-    fn to_value(&self, #[allow(unused_variables)] meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, #[allow(unused_variables)] meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         rsn! {@(meta) => () }
     }
 }
 
 impl<M, C> ToValue<M, C> for str {
-    fn to_value(&self, _meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, _meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         Spanned::create(ValueKind::String(std::borrow::Cow::Borrowed(self)))
     }
 }
 
 impl<M, C> ToValue<M, C> for String {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         self.as_str().to_value(meta)
     }
 }
 
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for Box<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         T::to_value(&**self, meta)
     }
 }
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for std::rc::Rc<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         T::to_value(&**self, meta)
     }
 }
 impl<M, C, T: ToValue<M, C>> ToValue<M, C> for std::sync::Arc<T> {
-    fn to_value(&self, meta: &M) -> Value<C> {
+    fn to_value<'v>(&'v self, meta: &'v M) -> Value<'v, C>
+    where
+        C: 'v,
+    {
         T::to_value(&**self, meta)
     }
 }

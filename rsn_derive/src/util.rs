@@ -81,12 +81,12 @@ impl TryFrom<&Vec<syn::Attribute>> for ContainerAttrs {
     }
 }
 
-#[derive(PartialEq, Clone)]
+#[derive(Clone)]
 pub enum FieldModifier {
-    Flatten,
     Default,
+    Flatten,
     Skip,
-    WithExpr(syn::Token![=], syn::Expr),
+    WithExpr(#[allow(dead_code)] syn::Token![=], syn::Expr),
 }
 
 impl FieldModifier {
@@ -257,7 +257,6 @@ impl ValueData {
 pub struct ValueDeriveInput {
     pub attrs: ContainerAttrs,
     pub data: ValueData,
-    pub ident: syn::Ident,
     pub real_ident: syn::Ident,
     pub ident_str: String,
     pub generics: syn::Generics,
@@ -653,6 +652,9 @@ impl ValueDeriveInput {
             let mut add_field_bounds = |fields: &ValueFields| match fields {
                 ValueFields::Named(fields) => {
                     for (attrs, _, ty) in fields {
+                        if attrs.skip_bound {
+                            continue;
+                        }
                         let trait_ident = match attrs.modifier {
                             None | Some(FieldModifier::Default) => trait_ident,
                             Some(FieldModifier::Flatten) => flatten_named_trait_ident,
@@ -664,6 +666,9 @@ impl ValueDeriveInput {
                 }
                 ValueFields::Unnamed(fields) => {
                     for (attrs, ty) in fields {
+                        if attrs.skip_bound {
+                            continue;
+                        }
                         let trait_ident = match attrs.modifier {
                             None | Some(FieldModifier::Default) => trait_ident,
                             Some(FieldModifier::Flatten) => flatten_unnamed_trait_ident,
@@ -685,9 +690,34 @@ impl ValueDeriveInput {
                 }
             }
         }
-        let where_clause = modified_generics.where_clause.clone();
+        // let where_clause = modified_generics.where_clause.clone();
+
+        let mut where_clause = modified_generics.make_where_clause().clone();
+
+        where_clause
+            .predicates
+            .push(syn::WherePredicate::Type(syn::PredicateType {
+                lifetimes: None,
+                bounded_ty: custom_type.clone(),
+                colon_token: Default::default(),
+                bounds: Punctuated::from_iter([syn::TypeParamBound::Trait(syn::TraitBound {
+                    paren_token: None,
+                    modifier: syn::TraitBoundModifier::None,
+                    lifetimes: None,
+                    path: syn::Path {
+                        leading_colon: Some(Default::default()),
+                        segments: Punctuated::from_iter([
+                            syn::PathSegment::from(format_ident!("core")),
+                            syn::PathSegment::from(format_ident!("fmt")),
+                            syn::PathSegment::from(format_ident!("Debug")),
+                        ]),
+                    },
+                })]),
+            }));
+
+        let where_clause = Some(where_clause);
+
         Ok(Self {
-            ident: ident.clone(),
             data,
             ident_str,
             real_ident: real_ident.clone(),

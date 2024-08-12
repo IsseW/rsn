@@ -9,17 +9,20 @@ pub enum No {}
 pub trait Bool {
     const VALUE: bool;
 
+    type SelectSet<A: Set, B: Set>: Set;
     type Or<Other: Bool>: Bool;
 }
 
 impl Bool for Yes {
     type Or<Other: Bool> = Yes;
 
+    type SelectSet<A: Set, B: Set> = A;
     const VALUE: bool = true;
 }
 
 impl Bool for No {
     type Or<Other: Bool> = Other;
+    type SelectSet<A: Set, B: Set> = B;
 
     const VALUE: bool = false;
 }
@@ -28,12 +31,14 @@ pub struct TypeEq<A, B>(PhantomData<(A, B)>);
 
 impl<A, B> Bool for TypeEq<A, B> {
     default type Or<Other: Bool> = Other;
+    default type SelectSet<X: Set, Y: Set> = Y;
 
     default const VALUE: bool = false;
 }
 
 impl<T> Bool for TypeEq<T, T> {
     type Or<Other: Bool> = Yes;
+    type SelectSet<A: Set, B: Set> = A;
 
     const VALUE: bool = true;
 }
@@ -59,6 +64,7 @@ pub trait Set: Sized {
     const LEN: usize;
     type Contains<T>: Bool;
     type Overlaps<S: Set>: Bool;
+    type InsertInto<S: Set>: Set;
 }
 
 pub struct EmptySet;
@@ -71,6 +77,7 @@ impl Set for EmptySet {
     type Contains<T> = No;
 
     type Overlaps<S: Set> = No;
+    type InsertInto<S: Set> = S;
 }
 
 pub struct Type<T>(PhantomData<T>);
@@ -78,6 +85,7 @@ pub struct Type<T>(PhantomData<T>);
 impl<T> Set for Type<T> {
     type Contains<U> = TypeEq<T, U>;
     type Overlaps<S: Set> = S::Contains<T>;
+    type InsertInto<S: Set> = Insert<S, T>;
 
     const LEN: usize = 1;
     const IS_VALID: bool = true;
@@ -90,6 +98,7 @@ type Or<A, B> = <A as Bool>::Or<B>;
 impl<S: Set, T> Set for TypeSet<S, T> {
     type Contains<U> = Or<S::Contains<U>, TypeEq<T, U>>;
     type Overlaps<V: Set> = Or<V::Contains<T>, S::Overlaps<V>>;
+    type InsertInto<O: Set> = Insert<S::InsertInto<O>, T>;
 
     const LEN: usize = S::LEN + 1;
 
@@ -101,8 +110,12 @@ pub struct TypeSetUnion<A: Set, B: Set>(PhantomData<(A, B)>);
 impl<A: Set, B: Set> Set for TypeSetUnion<A, B> {
     type Contains<U> = Or<A::Contains<U>, B::Contains<U>>;
     type Overlaps<S: Set> = Or<A::Overlaps<S>, B::Overlaps<S>>;
+    type InsertInto<O: Set> = <A::InsertInto<B> as Set>::InsertInto<O>;
 
     const LEN: usize = A::LEN + B::LEN;
 
     const IS_VALID: bool = !A::Overlaps::<B>::VALUE;
 }
+
+pub type Insert<A, B> = <<A as Set>::Contains<B> as Bool>::SelectSet<A, TypeSet<A, B>>;
+pub type Union<A, B> = <A as Set>::InsertInto<B>;

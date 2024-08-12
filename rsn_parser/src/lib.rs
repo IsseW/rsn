@@ -382,7 +382,9 @@ impl<'a> Chars<'a> {
                         },
                     ),
                 )
-                | (Err(_), Err(err)) => break Err(err),
+                | (Err(_), Err(err)) => {
+                    break Err(err);
+                }
                 (Ok(_), _) => {}
             }
         }

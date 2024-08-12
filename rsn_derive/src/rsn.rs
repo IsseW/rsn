@@ -168,7 +168,7 @@ fn custom_parser<'a>(
                     }
                 }
                 if c == '#' {
-                    if let Ok(c) = chars.next_c_matches(|c| *c == '_' || c.is_alphabetic()) {
+                    if let Ok(c) = chars.next_nw_matches(|c| *c == '_' || c.is_alphabetic()) {
                         let ident = chars.parse_ident(c, chars.place)?;
                         variables.push(ident);
                     }
@@ -266,6 +266,7 @@ pub fn parse(input: &TokenStream) -> syn::Result<TokenStream> {
             meta = quote! { #ident };
         }
     }
+    // return Ok(quote!(#input_src));
     let value = parse_inner(input_src, 0).map_err(map_err)?;
 
     let value = codify_value(input, value, &meta, true).map_err(map_err)?;

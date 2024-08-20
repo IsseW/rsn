@@ -62,6 +62,7 @@ struct ConstructNamed {
 fn construct_fields_named(
     fields: &ValueNamedFields,
     self_repr: TokenStream,
+    custom_type: &syn::Type,
 ) -> syn::Result<ConstructNamed> {
     let error = quote!(__rsn::FromValueErrorKind);
 
@@ -83,7 +84,7 @@ fn construct_fields_named(
                 },
                 Some(FieldModifier::WithSerde) => {
                     quote! {
-                        #real_ident: __rsn::Serde::<#ty>::from_value(
+                        #real_ident: __rsn::Serde::<#ty>::from_value::<#custom_type>(
                             fields.swap_remove(#ident_str)
                                 .ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?,
                         )?
@@ -140,6 +141,7 @@ fn construct_fields_named(
 fn construct_fields_unnamed(
     fields: &ValueUnnamedFields,
     self_repr: TokenStream,
+    custom_type: &syn::Type,
 ) -> syn::Result<TokenStream> {
     let field_iter: Vec<_> = fields
         .iter()
@@ -150,7 +152,7 @@ fn construct_fields_unnamed(
                 }
                 Some(FieldModifier::WithSerde) => {
                     quote!(
-                        __rsn::Serde::<#ty>::from_value(iter.next().unwrap())?
+                        __rsn::Serde::<#ty>::from_value::<#custom_type>(iter.next().unwrap())?
                     )
                 }
                 Some(FieldModifier::Flatten) => quote!(__rsn::ParseUnnamedFields::parse_fields(
@@ -191,7 +193,8 @@ fn fields_named(
 ) -> syn::Result<TokenStream> {
     let error = quote!(__rsn::FromValueErrorKind);
 
-    let ConstructNamed { required, optional } = construct_fields_named(fields, self_repr)?;
+    let ConstructNamed { required, optional } =
+        construct_fields_named(fields, self_repr, custom_type)?;
 
     let field_parse = if let Some(parse_impl) = generate_parse_trait(&required, &optional) {
         quote! {
@@ -264,7 +267,7 @@ fn fields_unnamed(
 ) -> syn::Result<TokenStream> {
     let error = quote!(__rsn::FromValueErrorKind);
 
-    let parse_fields = construct_fields_unnamed(fields, self_repr)?;
+    let parse_fields = construct_fields_unnamed(fields, self_repr, custom_type)?;
 
     let (parse_impl, parse_fields) = if let Some(parse_impl) = generate_parse_trait(&parse_fields) {
         (

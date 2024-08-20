@@ -16,6 +16,7 @@ pub fn from_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let from_value = util::ValueDeriveInput::from_input(
         &input,
+        true,
         "FromValue",
         "ParseNamedFields",
         "ParseUnnamedFields",
@@ -44,6 +45,7 @@ pub fn to_value(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let to_value = util::ValueDeriveInput::from_input(
         &input,
+        false,
         "ToValue",
         "WriteNamedFields",
         "WriteUnnamedFields",

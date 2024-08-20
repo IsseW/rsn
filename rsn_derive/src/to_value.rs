@@ -34,6 +34,14 @@ fn fields_named(
                         );
                     }
                 }
+                Some(FieldModifier::WithSerde) => {
+                    quote! {
+                        fields.insert(
+                            __rsn::Spanned::create(#ident_str),
+                            __rsn::Serde::<#ty>::to_value(#ident),
+                        );
+                    }
+                }
                 Some(FieldModifier::Flatten) => {
                     quote! {
                         <#ty as __rsn::WriteNamedFields<#meta_type, #custom_type>>::write_fields(#ident, fields, meta);
@@ -107,6 +115,11 @@ fn fields_unnamed(
             None => {
                 quote! {
                     fields.push(<#ty as __rsn::ToValue<#meta_type, #custom_type>>::to_value(#ident, meta));
+                }
+            }
+            Some(FieldModifier::WithSerde) => {
+                quote! {
+                    fields.push(__rsn::Serde::<#ty>::to_value(#ident));
                 }
             }
             Some(FieldModifier::Flatten) => {
@@ -220,6 +233,7 @@ pub fn to_value(
         where_clause,
         meta_type,
         custom_type,
+        ..
     }: ValueDeriveInput,
 ) -> syn::Result<TokenStream> {
     let mut checks = quote!();

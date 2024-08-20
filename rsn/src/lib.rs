@@ -10,8 +10,13 @@
 )]
 
 mod from_value;
+mod serde;
 mod to_value;
 
+pub use from_value::flatten::{
+    NamedFields, ParseNamedFields, ParseUnnamedFields, UnnamedFields, WriteNamedFields,
+    WriteUnnamedFields, __types,
+};
 pub use from_value::{AnyRange, Error as FromValueErrorKind, FromValue, FromValueError};
 pub use rsn_derive::rsn;
 pub use rsn_parser::{
@@ -19,12 +24,8 @@ pub use rsn_parser::{
     value::{Fields, Map, Path, Value, ValueKind},
     Error, ParseError,
 };
+pub use serde::Serde;
 pub use to_value::{default::IsDefault, ToValue};
-
-pub use from_value::flatten::{
-    NamedFields, ParseNamedFields, ParseUnnamedFields, UnnamedFields, WriteNamedFields,
-    WriteUnnamedFields, __types,
-};
 
 #[cfg(feature = "derive")]
 pub use rsn_derive::{FromValue, ToValue};
@@ -47,11 +48,14 @@ impl Display for FullError {
 
 impl std::error::Error for FullError {}
 
-pub fn de<T: FromValue<(), !>>(src: &str) -> Result<T, FullError> {
+pub fn de<'a, T: FromValue<'a, (), !>>(src: &'a str) -> Result<T, FullError> {
     de_with_meta(src, &mut ())
 }
 
-pub fn de_with_meta<M, T: FromValue<M, !>>(src: &str, meta: &mut M) -> Result<T, FullError> {
+pub fn de_with_meta<'a, M, T: FromValue<'a, M, !>>(
+    src: &'a str,
+    meta: &mut M,
+) -> Result<T, FullError> {
     Value::parse_str(src)
         .map_err(|e| {
             let mut err = e.display_in_src(src);

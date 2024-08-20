@@ -87,6 +87,7 @@ pub enum FieldModifier {
     Flatten,
     Skip,
     WithExpr(#[allow(dead_code)] syn::Token![=], syn::Expr),
+    WithSerde,
 }
 
 impl FieldModifier {
@@ -96,6 +97,7 @@ impl FieldModifier {
             FieldModifier::Default => "default",
             FieldModifier::Skip => "skip",
             FieldModifier::WithExpr(_, _) => "from_meta",
+            FieldModifier::WithSerde => "with_serde",
         }
     }
 }
@@ -125,6 +127,7 @@ impl syn::parse::Parse for FieldAttr {
                 tag,
                 FieldModifier::WithExpr(input.parse()?, input.parse()?),
             ),
+            "with_serde" => FieldAttr::FieldModifier(tag, FieldModifier::WithSerde),
             "rename" => FieldAttr::Rename(tag, input.parse()?, input.parse()?),
             "skip_bound" => FieldAttr::SkipBound(tag),
 
@@ -135,6 +138,7 @@ impl syn::parse::Parse for FieldAttr {
 
 #[derive(Default)]
 pub struct FieldAttrs {
+    pub modifier_span: Option<proc_macro2::Span>,
     pub modifier: Option<FieldModifier>,
     pub rename: Option<syn::Ident>,
     pub skip_bound: bool,
@@ -158,6 +162,7 @@ impl TryFrom<&Vec<syn::Attribute>> for FieldAttrs {
                                 return Err(syn::Error::new(tag.span(), format!("Multiple field modifier tags, this field already has a {} tag", modifier.as_str())));
                             }
 
+                            this.modifier_span = Some(tag.span());
                             this.modifier = Some(modifier);
                         }
                         FieldAttr::Rename(tag, _, rename) => {
@@ -264,11 +269,13 @@ pub struct ValueDeriveInput {
     pub where_clause: Option<syn::WhereClause>,
     pub meta_type: syn::Type,
     pub custom_type: syn::Type,
+    pub lifetime: Option<syn::Lifetime>,
 }
 
 impl ValueDeriveInput {
     pub fn from_input(
         input: &syn::DeriveInput,
+        use_lifetime: bool,
         trait_ident: &str,
         flatten_named_trait_ident: &str,
         flatten_unnamed_trait_ident: &str,
@@ -280,8 +287,24 @@ impl ValueDeriveInput {
         let ident = attrs.rename.as_ref().unwrap_or(real_ident);
         let ident_str = ident.to_string();
         let generics = &input.generics;
+        let lifetime = use_lifetime.then(|| syn::Lifetime {
+            apostrophe: generics.span(),
+            ident: format_ident!("_rsn_lifetime"),
+        });
 
         let mut modified_generics = generics.clone();
+
+        if let Some(lifetime) = &lifetime {
+            modified_generics.params.insert(
+                0,
+                syn::GenericParam::Lifetime(syn::LifetimeDef {
+                    attrs: Vec::new(),
+                    lifetime: lifetime.clone(),
+                    colon_token: None,
+                    bounds: Punctuated::new(),
+                }),
+            )
+        }
         let meta_type = if let Some(ty) = attrs.with_meta.clone() {
             ty
         } else {
@@ -526,12 +549,21 @@ impl ValueDeriveInput {
                                         syn::AngleBracketedGenericArguments {
                                             colon2_token: None,
                                             lt_token: syn::Token![<](param.span()),
-                                            args: Punctuated::from_iter([
-                                                syn::GenericArgument::Type(
-                                                    parameterized_meta_type.clone(),
-                                                ),
-                                                syn::GenericArgument::Type(custom_type.clone()),
-                                            ]),
+                                            args: Punctuated::from_iter(
+                                                [
+                                                    lifetime
+                                                        .clone()
+                                                        .map(syn::GenericArgument::Lifetime),
+                                                    Some(syn::GenericArgument::Type(
+                                                        parameterized_meta_type.clone(),
+                                                    )),
+                                                    Some(syn::GenericArgument::Type(
+                                                        custom_type.clone(),
+                                                    )),
+                                                ]
+                                                .into_iter()
+                                                .flatten(),
+                                            ),
                                             gt_token: syn::Token![>](param.span()),
                                         },
                                     ),
@@ -605,7 +637,7 @@ impl ValueDeriveInput {
                 }
             }
 
-            let mut add_type_bound = |ty: &syn::Type, trait_ident: &str| {
+            let mut add_type_bound = |ty: &syn::Type, bound_trait_ident: &str| {
                 if skip_bound(ty, real_ident) {
                     return;
                 }
@@ -625,19 +657,26 @@ impl ValueDeriveInput {
                                     segments: Punctuated::from_iter([
                                         syn::PathSegment::from(format_ident!("__rsn")),
                                         syn::PathSegment {
-                                            ident: format_ident!("{trait_ident}"),
+                                            ident: format_ident!("{bound_trait_ident}"),
                                             arguments: syn::PathArguments::AngleBracketed(
                                                 syn::AngleBracketedGenericArguments {
                                                     colon2_token: None,
                                                     lt_token: syn::Token![<](ty.span()),
-                                                    args: Punctuated::from_iter([
-                                                        syn::GenericArgument::Type(
-                                                            parameterized_meta_type.clone(),
-                                                        ),
-                                                        syn::GenericArgument::Type(
-                                                            custom_type.clone(),
-                                                        ),
-                                                    ]),
+                                                    args: Punctuated::from_iter(
+                                                        [
+                                                            lifetime.clone().map(
+                                                                syn::GenericArgument::Lifetime,
+                                                            ),
+                                                            Some(syn::GenericArgument::Type(
+                                                                parameterized_meta_type.clone(),
+                                                            )),
+                                                            Some(syn::GenericArgument::Type(
+                                                                custom_type.clone(),
+                                                            )),
+                                                        ]
+                                                        .into_iter()
+                                                        .flatten(),
+                                                    ),
                                                     gt_token: syn::Token![>](ty.span()),
                                                 },
                                             ),
@@ -652,16 +691,43 @@ impl ValueDeriveInput {
             let mut add_field_bounds = |fields: &ValueFields| match fields {
                 ValueFields::Named(fields) => {
                     for (attrs, _, ty) in fields {
+                        let mut ty = ty.clone();
                         if attrs.skip_bound {
                             continue;
                         }
                         let trait_ident = match attrs.modifier {
                             None | Some(FieldModifier::Default) => trait_ident,
+                            Some(FieldModifier::WithSerde) => {
+                                ty = syn::Type::Path(syn::TypePath {
+                                    qself: None,
+                                    path: syn::Path {
+                                        leading_colon: None,
+                                        segments: Punctuated::from_iter([
+                                            syn::PathSegment::from(format_ident!("__rsn")),
+                                            syn::PathSegment {
+                                                ident: format_ident!("Serde"),
+                                                arguments: syn::PathArguments::AngleBracketed(
+                                                    syn::AngleBracketedGenericArguments {
+                                                        colon2_token: None,
+                                                        lt_token: syn::Token![<](ty.span()),
+                                                        gt_token: syn::Token![>](ty.span()),
+                                                        args: Punctuated::from_iter([
+                                                            syn::GenericArgument::Type(ty),
+                                                        ]),
+                                                    },
+                                                ),
+                                            },
+                                        ]),
+                                    },
+                                });
+
+                                trait_ident
+                            }
                             Some(FieldModifier::Flatten) => flatten_named_trait_ident,
                             Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => continue,
                         };
 
-                        add_type_bound(ty, trait_ident)
+                        add_type_bound(&ty, trait_ident)
                     }
                 }
                 ValueFields::Unnamed(fields) => {
@@ -669,13 +735,40 @@ impl ValueDeriveInput {
                         if attrs.skip_bound {
                             continue;
                         }
+                        let mut ty = ty.clone();
                         let trait_ident = match attrs.modifier {
                             None | Some(FieldModifier::Default) => trait_ident,
+                            Some(FieldModifier::WithSerde) => {
+                                ty = syn::Type::Path(syn::TypePath {
+                                    qself: None,
+                                    path: syn::Path {
+                                        leading_colon: None,
+                                        segments: Punctuated::from_iter([
+                                            syn::PathSegment::from(format_ident!("__rsn")),
+                                            syn::PathSegment {
+                                                ident: format_ident!("Serde"),
+                                                arguments: syn::PathArguments::AngleBracketed(
+                                                    syn::AngleBracketedGenericArguments {
+                                                        colon2_token: None,
+                                                        lt_token: syn::Token![<](ty.span()),
+                                                        gt_token: syn::Token![>](ty.span()),
+                                                        args: Punctuated::from_iter([
+                                                            syn::GenericArgument::Type(ty),
+                                                        ]),
+                                                    },
+                                                ),
+                                            },
+                                        ]),
+                                    },
+                                });
+
+                                trait_ident
+                            }
                             Some(FieldModifier::Flatten) => flatten_unnamed_trait_ident,
                             Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => continue,
                         };
 
-                        add_type_bound(ty, trait_ident)
+                        add_type_bound(&ty, trait_ident)
                     }
                 }
                 ValueFields::Unit => {}
@@ -727,6 +820,7 @@ impl ValueDeriveInput {
             meta_type,
             custom_type,
             attrs,
+            lifetime,
         })
     }
 }

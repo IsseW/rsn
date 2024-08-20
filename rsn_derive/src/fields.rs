@@ -65,7 +65,7 @@ impl<'a> UnnamedFieldsInfo<'a> {
                 ))
             };
             match &attrs.modifier {
-                None => {
+                None | Some(FieldModifier::WithSerde) => {
                     if let Some(span) = expects_end {
                         return error(span);
                     }
@@ -118,7 +118,7 @@ impl<'a> NamedFieldsInfo<'a> {
         for (attrs, ident, ty) in fields {
             let ident = attrs.rename.as_ref().unwrap_or(ident);
             match attrs.modifier {
-                None => required_fields.push(ident.clone()),
+                None | Some(FieldModifier::WithSerde) => required_fields.push(ident.clone()),
                 Some(FieldModifier::Flatten) => flattened_fields.push(ty),
                 Some(FieldModifier::Default) => optional_fields.push(ident.clone()),
                 Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => {}

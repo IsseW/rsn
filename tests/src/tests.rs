@@ -23,7 +23,7 @@ fn test_rsn_macro() {
     assert_eq!(test.b, "hello!");
 }
 
-fn de<T: rsn::FromValue<(), !>>(str: &str) -> T {
+fn de<'a, T: rsn::FromValue<'a, (), !>>(str: &'a str) -> T {
     match rsn::de(str) {
         Ok(t) => t,
         Err(err) => panic!("\n{err}\n"),

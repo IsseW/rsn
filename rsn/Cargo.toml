@@ -18,6 +18,7 @@ hashbrown = { version = "0.14", optional = true }
 
 rsn_derive = { path = "../rsn_derive", optional = true }
 rsn_parser.path = "../rsn_parser"
+serde = "1.0.206"
 
 [features]
 default = ["derive", "impl_vek", "impl_hashbrown"]

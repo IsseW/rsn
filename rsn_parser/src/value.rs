@@ -33,6 +33,16 @@ fn try_trim_end(text: &mut &str, pattern: &str) -> bool {
 }
 
 impl<'a> Path<'a> {
+    pub fn span(&self) -> Span {
+        self.idents
+            .first()
+            .zip(self.idents.last())
+            .map(|(first, last)| Span {
+                start: first.span.start,
+                end: last.span.end,
+            })
+            .unwrap_or(Span::empty())
+    }
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.leading && self.len() == 0

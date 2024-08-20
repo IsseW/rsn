@@ -17,7 +17,7 @@ fn named_help(fields: &ValueNamedFields, path: &str) -> syn::Result<String> {
             Some(FieldModifier::Default) => {
                 write!(msg, "\n\t{}: <value>, <optional>", ident).unwrap();
             }
-            None => {
+            None | Some(FieldModifier::WithSerde) => {
                 write!(msg, "\n\t{}: <value>,", ident).unwrap();
             }
             Some(FieldModifier::Flatten) => {
@@ -37,7 +37,7 @@ fn unnamed_help(fields: &ValueUnnamedFields, path: &str) -> syn::Result<String> 
 
     for (attrs, _) in fields.iter() {
         match attrs.modifier {
-            None => {
+            None | Some(FieldModifier::WithSerde) => {
                 write!(msg, "\n\t<value>,").unwrap();
             }
             Some(FieldModifier::Flatten) => {
@@ -69,7 +69,7 @@ fn construct_fields_named(
     let mut post2 = quote!();
     let field_iter: Vec<_> = fields
         .iter()
-        .map(|(attrs, real_ident, _)| {
+        .map(|(attrs, real_ident, ty)| {
             let ident = attrs.rename.as_ref().unwrap_or(real_ident);
             let ident_str = ident.to_string();
             let res = match &attrs.modifier {
@@ -78,6 +78,14 @@ fn construct_fields_named(
                         #real_ident: __rsn::FromValue::from_value(
                             fields.swap_remove(#ident_str).ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?,
                             meta,
+                        )?
+                    }
+                },
+                Some(FieldModifier::WithSerde) => {
+                    quote! {
+                        #real_ident: __rsn::Serde::<#ty>::from_value(
+                            fields.swap_remove(#ident_str)
+                                .ok_or(__rsn::FromValueError::new(span, #error::MissingField(#ident_str)))?,
                         )?
                     }
                 },
@@ -135,10 +143,15 @@ fn construct_fields_unnamed(
 ) -> syn::Result<TokenStream> {
     let field_iter: Vec<_> = fields
         .iter()
-        .map(|(attrs, _ty)| {
+        .map(|(attrs, ty)| {
             let res = match &attrs.modifier {
                 None => {
                     quote!(__rsn::FromValue::from_value(iter.next().unwrap(), meta)?)
+                }
+                Some(FieldModifier::WithSerde) => {
+                    quote!(
+                        __rsn::Serde::<#ty>::from_value(iter.next().unwrap())?
+                    )
                 }
                 Some(FieldModifier::Flatten) => quote!(__rsn::ParseUnnamedFields::parse_fields(
                     span,
@@ -310,10 +323,78 @@ pub fn from_value(
         mut where_clause,
         meta_type,
         custom_type,
+        lifetime,
     }: ValueDeriveInput,
 ) -> syn::Result<TokenStream> {
     let error = quote!(__rsn::FromValueErrorKind);
     let mut added_clone = false;
+    let mut add_clone_bound = |span| {
+        if !added_clone {
+            added_clone = true;
+            let where_clause = where_clause.get_or_insert(syn::WhereClause {
+                where_token: syn::Token![where](span),
+                predicates: Punctuated::default(),
+            });
+
+            where_clause
+                .predicates
+                .push(syn::WherePredicate::Type(syn::PredicateType {
+                    lifetimes: None,
+                    bounded_ty: custom_type.clone(),
+                    colon_token: syn::Token![:](span),
+                    bounds: Punctuated::from_iter([syn::TypeParamBound::Trait(syn::TraitBound {
+                        paren_token: None,
+                        modifier: syn::TraitBoundModifier::None,
+                        lifetimes: None,
+                        path: syn::Path {
+                            leading_colon: Some(syn::Token![::](span)),
+                            segments: Punctuated::from_iter([
+                                syn::PathSegment::from(format_ident!("core")),
+                                syn::PathSegment::from(format_ident!("clone")),
+                                syn::PathSegment::from(format_ident!("Clone")),
+                            ]),
+                        },
+                    })]),
+                }));
+        }
+    };
+
+    let mut field_bound = |field_attrs: &FieldAttrs| {
+        if matches!(field_attrs.modifier, Some(FieldModifier::WithSerde)) {
+            add_clone_bound(field_attrs.modifier_span.unwrap())
+        }
+    };
+
+    let mut fields_bound = |fields: &_| match fields {
+        ValueFields::Unit => {}
+        ValueFields::Unnamed(fields) => {
+            for (attrs, ..) in fields {
+                field_bound(attrs)
+            }
+        }
+        ValueFields::Named(fields) => {
+            for (attrs, ..) in fields {
+                field_bound(attrs)
+            }
+        }
+    };
+
+    let mut has_untagged = false;
+    match &data {
+        ValueData::Struct(fields) => fields_bound(fields),
+        ValueData::Enum(variants) => {
+            for (.., fields) in variants {
+                fields_bound(fields)
+            }
+
+            for (attrs, ..) in variants {
+                if let Some(untagged) = &attrs.untagged {
+                    has_untagged = true;
+                    add_clone_bound(untagged.span())
+                }
+            }
+        }
+    }
 
     let mut checks = quote!();
 
@@ -332,11 +413,11 @@ pub fn from_value(
                         |parse_required, parse_optional| {
                             Some(quote!(
                                 #[automatically_derived]
-                                impl #modified_generics  __rsn::ParseNamedFields<#meta_type, #custom_type> for #real_ident #generics #where_clause {
-                                    fn parse_required(span: __rsn::Span, fields: &mut __rsn::Fields<#custom_type>, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
+                                impl #modified_generics  __rsn::ParseNamedFields<#lifetime, #meta_type, #custom_type> for #real_ident #generics #where_clause {
+                                    fn parse_required(span: __rsn::Span, fields: &mut __rsn::Fields<#lifetime, #custom_type>, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
                                         Ok(#parse_required)
                                     }
-                                    fn parse_optional(&mut self, span: __rsn::Span, fields: &mut __rsn::Fields<#custom_type>, meta: &mut #meta_type) -> ::core::result::Result<(), __rsn::FromValueError> {
+                                    fn parse_optional(&mut self, span: __rsn::Span, fields: &mut __rsn::Fields<#lifetime, #custom_type>, meta: &mut #meta_type) -> ::core::result::Result<(), __rsn::FromValueError> {
                                         let this = self;
                                         #parse_optional
 
@@ -366,8 +447,8 @@ pub fn from_value(
                         |parse_fields| {
                             Some(quote!(
                                 #[automatically_derived]
-                                impl #modified_generics __rsn::ParseUnnamedFields<#meta_type, #custom_type> for #real_ident #generics #where_clause {
-                                    fn parse_fields<'a, I: Iterator<Item = __rsn::Value<'a, #custom_type>>>(struct_span: __rsn::Span, iter: &mut I, parse_optional: bool, meta: &mut #meta_type) -> Result<Self, __rsn::FromValueError> {
+                                impl #modified_generics __rsn::ParseUnnamedFields<#lifetime, #meta_type, #custom_type> for #real_ident #generics #where_clause {
+                                    fn parse_fields<I: Iterator<Item = __rsn::Value<#lifetime, #custom_type>>>(struct_span: __rsn::Span, iter: &mut I, parse_optional: bool, meta: &mut #meta_type) -> Result<Self, __rsn::FromValueError> {
                                         #parse_fields
                                     }
                                 }
@@ -479,30 +560,12 @@ pub fn from_value(
                     ))
                 })?;
 
-            if let Some(untagged) = &attrs.untagged {
+            if has_untagged {
                 let start = quote!(
                     let patterns = &[#help_msgs];
                     core::result::Result::Err(())
                 );
                 field_cases.into_iter().fold(start, |acc, cases| {
-                    if !added_clone {
-                        added_clone = true;
-                        let where_clause = where_clause.get_or_insert(syn::WhereClause { where_token: syn::Token![where](untagged.span()), predicates: Punctuated::default() });
-
-                        where_clause.predicates.push(syn::WherePredicate::Type(syn::PredicateType {
-                            lifetimes: None,
-                            bounded_ty: custom_type.clone(),
-                            colon_token: syn::Token![:](untagged.span()),
-                            bounds: Punctuated::from_iter([syn::TypeParamBound::Trait(syn::TraitBound { paren_token: None, modifier: syn::TraitBoundModifier::None, lifetimes: None, path: syn::Path {
-                                leading_colon: Some(syn::Token![::](untagged.span())),
-                                segments: Punctuated::from_iter([
-                                    syn::PathSegment::from(format_ident!("core")),
-                                    syn::PathSegment::from(format_ident!("clone")),
-                                    syn::PathSegment::from(format_ident!("Clone")),
-                                ]),
-                            }  })]),
-                        }));
-                    }
                     quote!(
                         let parse_optional = true;
                         #acc.or_else(|_| match value.clone().inner() {
@@ -525,8 +588,8 @@ pub fn from_value(
     Ok(quote! {
         #checks
          #[automatically_derived]
-         impl #modified_generics __rsn::FromValue<#meta_type, #custom_type> for #real_ident #generics #where_clause {
-             fn from_value(value: __rsn::Value<#custom_type>, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
+         impl #modified_generics __rsn::FromValue<#lifetime, #meta_type, #custom_type> for #real_ident #generics #where_clause {
+             fn from_value(value: __rsn::Value<#lifetime, #custom_type>, meta: &mut #meta_type) -> ::core::result::Result<Self, __rsn::FromValueError> {
                  let span = value.span;
                  #parse
              }

@@ -4,26 +4,26 @@ use crate::{FromValue, FromValueError, ValueKind};
 
 use super::Error;
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Vec2<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Vec2<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
         <(T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Vec3<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Vec3<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
         <(T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Vec4<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Vec4<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
         <(T, T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Aabr<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Aabr<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         macro_rules! from_fields {
             ($fields:expr) => {{
@@ -81,8 +81,8 @@ impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Aabr<T> {
     }
 }
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Aabb<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Aabb<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, FromValueError> {
         let span = value.span;
         macro_rules! from_fields {
             ($fields:expr) => {{
@@ -140,14 +140,14 @@ impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Aabb<T> {
     }
 }
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Rgb<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Rgb<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
         <(T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }
 
-impl<M, C, T: FromValue<M, C>> FromValue<M, C> for Rgba<T> {
-    fn from_value(value: crate::Value<C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Rgba<T> {
+    fn from_value(value: crate::Value<'a, C>, meta: &mut M) -> Result<Self, crate::FromValueError> {
         <(T, T, T, T)>::from_value(value, meta).map(Self::from)
     }
 }

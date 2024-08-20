@@ -34,23 +34,23 @@ pub trait NamedFields: Sized {
     const MAX_FIELDS: usize;
 }
 
-pub trait ParseNamedFields<M, C>: NamedFields {
+pub trait ParseNamedFields<'v, M, C>: NamedFields {
     fn parse_required(
         struct_span: Span,
-        fields: &mut Fields<C>,
+        fields: &mut Fields<'v, C>,
         meta: &mut M,
     ) -> Result<Self, crate::FromValueError>;
 
     fn parse_optional(
         &mut self,
         struct_span: Span,
-        fields: &mut Fields<C>,
+        fields: &mut Fields<'v, C>,
         meta: &mut M,
     ) -> Result<(), crate::FromValueError>;
 
     fn parse_fields(
         struct_span: Span,
-        fields: &mut Fields<C>,
+        fields: &mut Fields<'v, C>,
         meta: &mut M,
     ) -> Result<Self, crate::FromValueError> {
         let mut this = Self::parse_required(struct_span, fields, meta)?;
@@ -72,8 +72,8 @@ pub trait UnnamedFields: Sized {
     const MAX_FIELDS: usize;
 }
 
-pub trait ParseUnnamedFields<M, C>: UnnamedFields {
-    fn parse_fields<'a, I: Iterator<Item = Value<'a, C>>>(
+pub trait ParseUnnamedFields<'v, M, C>: UnnamedFields {
+    fn parse_fields<I: Iterator<Item = Value<'v, C>>>(
         struct_span: Span,
         fields: &mut I,
         parse_default: bool,

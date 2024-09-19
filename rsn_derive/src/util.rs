@@ -83,20 +83,18 @@ impl TryFrom<&Vec<syn::Attribute>> for ContainerAttrs {
 
 #[derive(Clone)]
 pub enum FieldModifier {
-    Default,
+    Default(syn::Expr),
+    Skip(syn::Expr),
     Flatten,
-    Skip,
-    WithExpr(#[allow(dead_code)] syn::Token![=], syn::Expr),
     WithSerde,
 }
 
 impl FieldModifier {
     pub fn as_str(&self) -> &str {
         match self {
+            FieldModifier::Default(_) => "default",
+            FieldModifier::Skip(_) => "skip",
             FieldModifier::Flatten => "flatten",
-            FieldModifier::Default => "default",
-            FieldModifier::Skip => "skip",
-            FieldModifier::WithExpr(_, _) => "from_meta",
             FieldModifier::WithSerde => "with_serde",
         }
     }
@@ -119,14 +117,35 @@ impl syn::parse::Parse for FieldAttr {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let tag: syn::Ident = input.parse()?;
 
+        let parse_expr = || {
+            let Some(_): Option<syn::Token![=]> = input.parse().ok() else {
+                return Ok(syn::Expr::Call(syn::ExprCall {
+                    attrs: Vec::new(),
+                    func: Box::new(syn::Expr::Path(syn::ExprPath {
+                        attrs: Vec::new(),
+                        qself: None,
+                        path: syn::Path {
+                            leading_colon: Some(syn::Token![::](input.span())),
+                            segments: Punctuated::from_iter([
+                                syn::PathSegment::from(format_ident!("core")),
+                                syn::PathSegment::from(format_ident!("default")),
+                                syn::PathSegment::from(format_ident!("Default")),
+                                syn::PathSegment::from(format_ident!("default")),
+                            ]),
+                        },
+                    })),
+                    paren_token: syn::token::Paren(input.span()),
+                    args: Punctuated::new(),
+                }));
+            };
+
+            input.parse()
+        };
+
         Ok(match tag.to_string().as_str() {
             "flatten" => FieldAttr::FieldModifier(tag, FieldModifier::Flatten),
-            "default" => FieldAttr::FieldModifier(tag, FieldModifier::Default),
-            "skip" => FieldAttr::FieldModifier(tag, FieldModifier::Skip),
-            "with_expr" => FieldAttr::FieldModifier(
-                tag,
-                FieldModifier::WithExpr(input.parse()?, input.parse()?),
-            ),
+            "default" => FieldAttr::FieldModifier(tag, FieldModifier::Default(parse_expr()?)),
+            "skip" => FieldAttr::FieldModifier(tag, FieldModifier::Skip(parse_expr()?)),
             "with_serde" => FieldAttr::FieldModifier(tag, FieldModifier::WithSerde),
             "rename" => FieldAttr::Rename(tag, input.parse()?, input.parse()?),
             "skip_bound" => FieldAttr::SkipBound(tag),
@@ -696,7 +715,7 @@ impl ValueDeriveInput {
                             continue;
                         }
                         let trait_ident = match attrs.modifier {
-                            None | Some(FieldModifier::Default) => trait_ident,
+                            None | Some(FieldModifier::Default(_)) => trait_ident,
                             Some(FieldModifier::WithSerde) => {
                                 ty = syn::Type::Path(syn::TypePath {
                                     qself: None,
@@ -724,7 +743,7 @@ impl ValueDeriveInput {
                                 trait_ident
                             }
                             Some(FieldModifier::Flatten) => flatten_named_trait_ident,
-                            Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => continue,
+                            Some(FieldModifier::Skip(_)) => continue,
                         };
 
                         add_type_bound(&ty, trait_ident)
@@ -737,7 +756,7 @@ impl ValueDeriveInput {
                         }
                         let mut ty = ty.clone();
                         let trait_ident = match attrs.modifier {
-                            None | Some(FieldModifier::Default) => trait_ident,
+                            None | Some(FieldModifier::Default(_)) => trait_ident,
                             Some(FieldModifier::WithSerde) => {
                                 ty = syn::Type::Path(syn::TypePath {
                                     qself: None,
@@ -765,7 +784,7 @@ impl ValueDeriveInput {
                                 trait_ident
                             }
                             Some(FieldModifier::Flatten) => flatten_unnamed_trait_ident,
-                            Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => continue,
+                            Some(FieldModifier::Skip(_)) => continue,
                         };
 
                         add_type_bound(&ty, trait_ident)

@@ -26,7 +26,7 @@ fn fields_named(
             };
             let ident_str = ident.to_string();
             match attrs.modifier {
-                None => {
+                None | Some(FieldModifier::Default(_)) => {
                     quote! {
                         fields.insert(
                             __rsn::Spanned::create(#ident_str),
@@ -47,17 +47,7 @@ fn fields_named(
                         <#ty as __rsn::WriteNamedFields<#meta_type, #custom_type>>::write_fields(#ident, fields, meta);
                     }
                 }
-                Some(FieldModifier::Default) => {
-                    quote! {
-                        if !__rsn::IsDefault::is_default(&self.#ident) {
-                            fields.insert(
-                                __rsn::Spanned::create(#ident_str),
-                                <#ty as __rsn::ToValue<#meta_type, #custom_type>>::to_value(#ident, meta),
-                            )
-                        }
-                    }
-                }
-                Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => quote!(),
+                Some(FieldModifier::Skip(_)) => quote!(),
             }
         }).fold(quote!(), |acc, field| {
             quote! {
@@ -112,7 +102,7 @@ fn fields_unnamed(
             #ident,
         };
         let write = match &attrs.modifier {
-            None => {
+            None | Some(FieldModifier::Default(_)) => {
                 quote! {
                     fields.push(<#ty as __rsn::ToValue<#meta_type, #custom_type>>::to_value(#ident, meta));
                 }
@@ -127,56 +117,7 @@ fn fields_unnamed(
                     <#ty as __rsn::WriteUnnamedFields<#meta_type, #custom_type>>::write_fields(#ident, fields, false, meta);
                 }
             }
-            Some(FieldModifier::Default) => {
-                let mut write = None;
-                for (j, (attrs, _)) in fields.iter().enumerate().skip(i).rev() {
-                    match attrs.modifier {
-                        Some(FieldModifier::Default) => {
-                            let mut statement = quote!();
-                            for (k, (attrs, ty)) in fields.iter().enumerate().take(j + 1).skip(i) {
-                                match attrs.modifier {
-                                    Some(FieldModifier::Default) => {
-                                        let ident = format_ident!("field{k}");
-                                        statement = quote! {
-                                            #statement
-                                            fields.push(
-                                                <#ty as __rsn::ToValue<#meta_type, #custom_type>>::to_value(#ident, meta),
-                                            );
-                                        };
-                                    }
-                                    Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => {}
-                                    _ => panic!("We shouldn't have any non-default fields here"),
-                                }
-                            }
-                            let ident = format_ident!("field{j}");
-                            statement = quote! {
-                                if !__rsn::IsDefault::is_default(#ident) {
-                                    #statement
-                                }
-                            };
-
-                            if let Some(write) = write.as_mut() {
-                                *write = quote! {
-                                    #write else #statement
-                                }
-                            } else {
-                                write = Some(statement)
-                            }
-                        }
-                        Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => {}
-                        _ => panic!("We shouldn't have any non-default fields here"),
-                    }
-                }
-
-                write_fields = quote! {
-                    #write_fields
-                    if write_default {
-                        #write
-                    }
-                };
-                break;
-            }
-            Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => quote! {},
+            Some(FieldModifier::Skip(_)) => quote! {},
         };
 
         write_fields = quote! {
@@ -193,7 +134,7 @@ fn fields_unnamed(
         quote! {
             #write_impl
 
-            <Self as __rsn::WriteUnnamedFields<#meta_type, #custom_type>>::write_fields(self, fields, write_default, meta)
+            <Self as __rsn::WriteUnnamedFields<#meta_type, #custom_type>>::write_fields(self, fields, write_default, meta);
         }
     } else {
         write_fields
@@ -258,7 +199,12 @@ pub fn to_value(
                         Some(quote! {
                             #[automatically_derived]
                             impl #modified_generics __rsn::WriteUnnamedFields<#meta_type, #custom_type> for #real_ident #generics #where_clause {
-                                fn write_fields<'a>(&'a self, fields: &mut ::std::vec::Vec<__rsn::Value<'a, #custom_type>, write_default: bool, meta: &'a #meta_type)
+                                fn write_fields<'a>(
+                                    &'a self,
+                                    fields: &mut ::std::vec::Vec<__rsn::Value<'a, #custom_type>>,
+                                    write_default: bool,
+                                    meta: &'a #meta_type,
+                                )
                                     where #custom_type: 'a
                                 {
                                     let #real_ident #pattern = self;

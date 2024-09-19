@@ -23,7 +23,7 @@ pub enum Error {
     MissingField(&'static str),
     ExpectedIdent(&'static str),
     UnexpectedIdent,
-    UnexpectedField,
+    UnexpectedField(String),
     ExpectedAmountOfElements(RangeInclusive<usize>),
     ExpectedType(&'static str),
     ExpectedPattern(&'static [&'static str]),
@@ -36,7 +36,7 @@ impl Display for Error {
             Error::MissingField(field) => write!(f, "Missing field {field}"),
             Error::ExpectedIdent(ident) => write!(f, "Expected {ident}"),
             Error::UnexpectedIdent => write!(f, "Unexpected ident"),
-            Error::UnexpectedField => write!(f, "Unexpected field"),
+            Error::UnexpectedField(s) => write!(f, "Unexpected field: {s:?}"),
             Error::ExpectedAmountOfElements(range) => {
                 if range.start() == range.end() {
                     write!(f, "Expected {} elements", range.start())
@@ -553,6 +553,13 @@ impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Box<T> {
         T::from_value(value, meta).map(Self::new)
     }
 }
+
+impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for Box<[T]> {
+    fn from_value(value: Value<'a, C>, meta: &mut M) -> Result<Self, FromValueError> {
+        Vec::from_value(value, meta).map(Self::from)
+    }
+}
+
 impl<'a, M, C, T: FromValue<'a, M, C>> FromValue<'a, M, C> for std::rc::Rc<T> {
     fn from_value(value: Value<'a, C>, meta: &mut M) -> Result<Self, FromValueError> {
         T::from_value(value, meta).map(Self::new)

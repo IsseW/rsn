@@ -14,7 +14,7 @@ fn named_help(fields: &ValueNamedFields, path: &str) -> syn::Result<String> {
 
     for (attrs, ident, _) in fields.iter() {
         match attrs.modifier {
-            Some(FieldModifier::Default) => {
+            Some(FieldModifier::Default(_)) => {
                 write!(msg, "\n\t{}: <value>, <optional>", ident).unwrap();
             }
             None | Some(FieldModifier::WithSerde) => {
@@ -23,7 +23,7 @@ fn named_help(fields: &ValueNamedFields, path: &str) -> syn::Result<String> {
             Some(FieldModifier::Flatten) => {
                 write!(msg, "\n\t{}: <value>, <flattened>", ident).unwrap();
             }
-            Some(FieldModifier::Skip | FieldModifier::WithExpr(_, _)) => {}
+            Some(FieldModifier::Skip(_)) => {}
         }
     }
     let _ = write!(msg, "\n}}");
@@ -43,10 +43,10 @@ fn unnamed_help(fields: &ValueUnnamedFields, path: &str) -> syn::Result<String> 
             Some(FieldModifier::Flatten) => {
                 write!(msg, "\n\t<value>, <flattened>").unwrap();
             }
-            Some(FieldModifier::Default) => {
+            Some(FieldModifier::Default(_)) => {
                 write!(msg, "\n\t<value>, <optional>").unwrap();
             }
-            Some(FieldModifier::Skip | FieldModifier::WithExpr(_, _)) => {}
+            Some(FieldModifier::Skip(_)) => {}
         }
     }
     let _ = write!(msg, "\n)");
@@ -61,7 +61,7 @@ struct ConstructNamed {
 
 fn construct_fields_named(
     fields: &ValueNamedFields,
-    self_repr: TokenStream,
+    self_repr: &TokenStream,
     custom_type: &syn::Type,
 ) -> syn::Result<ConstructNamed> {
     let error = quote!(__rsn::FromValueErrorKind);
@@ -93,34 +93,29 @@ fn construct_fields_named(
                 Some(FieldModifier::Flatten) => {
                     post2 = quote! {
                         #post2
-                        __rsn::ParseNamedFields::parse_optional(&mut this.#real_ident, span, fields, meta)?;
+                        __rsn::ParseNamedFields::parse_optional(#real_ident, span, fields, meta)?;
                     };
                     // Assumes that this field implements `NamedFields`
                     quote!(
                         #real_ident: __rsn::ParseNamedFields::parse_required(span, fields, meta)?
                     )
                 },
-                Some(FieldModifier::Default) => {
+                Some(FieldModifier::Default(expr)) => {
                     post1 = quote! {
                         #post1
                         if let Some(value) = fields.swap_remove(#ident_str) {
-                            this.#real_ident = __rsn::FromValue::from_value(value, meta)?;
+                            *#real_ident = __rsn::FromValue::from_value(value, meta)?;
                         }
                     };
                     quote! {
-                        #real_ident: ::core::default::Default::default()
+                        #real_ident: #expr
                     }
                 },
-                Some(FieldModifier::Skip) => {
-                    quote! {
-                        #real_ident: ::core::default::Default::default()
-                    }
-                },
-                Some(FieldModifier::WithExpr(_, expr)) => {
+                Some(FieldModifier::Skip(expr)) => {
                     quote! {
                         #real_ident: #expr
                     }
-                }
+                },
             };
             syn::Result::Ok(res)
         })
@@ -161,7 +156,7 @@ fn construct_fields_unnamed(
                     false,
                     meta
                 )),
-                Some(FieldModifier::Default) => {
+                Some(FieldModifier::Default(expr)) => {
                     quote!(if parse_optional {
                         iter.next()
                             .map(|v| __rsn::FromValue::from_value(v, meta).ok())
@@ -169,10 +164,9 @@ fn construct_fields_unnamed(
                     } else {
                         None
                     }
-                    .unwrap_or_default())
+                    .unwrap_or_else(|| #expr))
                 }
-                Some(FieldModifier::Skip) => quote!(core::default::Default::default()),
-                Some(FieldModifier::WithExpr(_, expr)) => quote!(#expr),
+                Some(FieldModifier::Skip(expr)) => quote!(#expr),
             };
             syn::Result::Ok(res)
         })
@@ -194,20 +188,26 @@ fn fields_named(
     let error = quote!(__rsn::FromValueErrorKind);
 
     let ConstructNamed { required, optional } =
-        construct_fields_named(fields, self_repr, custom_type)?;
+        construct_fields_named(fields, &self_repr, custom_type)?;
 
     let field_parse = if let Some(parse_impl) = generate_parse_trait(&required, &optional) {
         quote! {
             #parse_impl
 
-            <Self as __rsn::ParseNamedFields<#meta_type, #custom_type>>::parse_fields(span, fields, meta)
+            <Self as __rsn::ParseNamedFields<#meta_type, #custom_type>>::parse_fields(span, fields, meta)?
         }
     } else {
+        let field_names = fields.iter().map(|(_, ident, _)| ident);
         quote! {
             {
-                let mut this = #required;
+                let mut __this = #required;
+                let #self_repr {
+                    #(#field_names,)*
+                } = &mut __this else {
+                    unreachable!()
+                };
                 #optional
-                Ok(this)
+                __this
             }
         }
     };
@@ -218,9 +218,9 @@ fn fields_named(
             #field_parse
         };
         if let Some((ident, _)) = fields.into_iter().next() {
-            ::core::result::Result::Err(__rsn::FromValueError::new(ident.span, #error::UnexpectedField))
+            ::core::result::Result::Err(__rsn::FromValueError::new(ident.span, #error::UnexpectedField(ident.value.to_string())))
         } else {
-            res
+            Ok(res)
         }
     };
 
@@ -409,6 +409,7 @@ pub fn from_value(
             match fields {
                 ValueFields::Named(fields) => {
                     let min_fields = quote! { <Self as __rsn::NamedFields>::MIN_FIELDS };
+                    let field_names = fields.iter().map(|(_, ident, _)| ident);
                     let reprs = fields_named(
                         &fields,
                         check_path,
@@ -421,7 +422,9 @@ pub fn from_value(
                                         Ok(#parse_required)
                                     }
                                     fn parse_optional(&mut self, span: __rsn::Span, fields: &mut __rsn::Fields<#lifetime, #custom_type>, meta: &mut #meta_type) -> ::core::result::Result<(), __rsn::FromValueError> {
-                                        let this = self;
+                                        let Self {
+                                            #(#field_names,)*
+                                        } = self;
                                         #parse_optional
 
                                         Ok(())
@@ -579,6 +582,7 @@ pub fn from_value(
                 })
             } else {
                 quote!(
+                    let parse_optional = true;
                     match value.inner() {
                         #(#field_cases)*
                         value => core::result::Result::Err(__rsn::FromValueError::new(span, #error::ExpectedPattern(&[#help_msgs]))),

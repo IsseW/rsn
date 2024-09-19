@@ -1043,24 +1043,38 @@ impl<'de, C: Clone> serde::Deserializer<'de> for ValueDeserializer<'de, C> {
             ValueKind::Path(p)
             | ValueKind::NamedTuple(Spanned { value: p, .. }, _)
             | ValueKind::NamedStruct(Spanned { value: p, .. }, _)
-                if p.len() == 2
+                if (p.len() == 2
                     && *p.idents[0] == name
-                    && variants.iter().any(|variant| *p.idents[1] == *variant) =>
+                    && variants.iter().any(|variant| *p.idents[1] == *variant))
+                    || (p.len() == 1
+                        && variants.iter().any(|variant| *p.idents[0] == *variant)) =>
             {
                 visitor.visit_enum(ValueEnum { v: self.v })
             }
             _ => Err(WrappedError(FromValueError::new(
                 self.v.span,
-                FromValueErrorKind::ExpectedType(name),
+                FromValueErrorKind::ExpectedPattern(variants),
             ))),
         }
     }
 
-    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: serde::de::Visitor<'de>,
     {
-        todo!()
+        match self.v.value {
+            ValueKind::Path(p)
+            | ValueKind::NamedTuple(Spanned { value: p, .. }, _)
+            | ValueKind::NamedStruct(Spanned { value: p, .. }, _)
+                if p.len() == 1 =>
+            {
+                visitor.visit_borrowed_str(&p.idents[0])
+            }
+            _ => Err(WrappedError(FromValueError::new(
+                self.v.span,
+                FromValueErrorKind::Custom("Expected identifier!?".to_string()),
+            ))),
+        }
     }
 
     fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>

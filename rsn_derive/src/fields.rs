@@ -77,11 +77,11 @@ impl<'a> UnnamedFieldsInfo<'a> {
                     }
                     flattened_fields.push(ty);
                 }
-                Some(FieldModifier::Default) => {
+                Some(FieldModifier::Default(_)) => {
                     optional_fields += 1;
                     expects_end = Some(ty.span());
                 }
-                Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => {}
+                Some(FieldModifier::Skip(_)) => {}
             }
         }
 
@@ -120,8 +120,8 @@ impl<'a> NamedFieldsInfo<'a> {
             match attrs.modifier {
                 None | Some(FieldModifier::WithSerde) => required_fields.push(ident.clone()),
                 Some(FieldModifier::Flatten) => flattened_fields.push(ty),
-                Some(FieldModifier::Default) => optional_fields.push(ident.clone()),
-                Some(FieldModifier::Skip | FieldModifier::WithExpr(..)) => {}
+                Some(FieldModifier::Default(_)) => optional_fields.push(ident.clone()),
+                Some(FieldModifier::Skip(_)) => {}
             }
         }
 

@@ -9,7 +9,6 @@ use rsn_derive::rsn;
 
 use crate::{AnyRange, Path, Spanned, UnnamedFields, Value, ValueKind, WriteUnnamedFields};
 
-pub mod default;
 #[cfg(feature = "hashbrown")]
 mod hashbrown;
 #[cfg(feature = "vek")]

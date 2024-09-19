@@ -25,7 +25,7 @@ pub use rsn_parser::{
     Error, ParseError,
 };
 pub use serde::Serde;
-pub use to_value::{default::IsDefault, ToValue};
+pub use to_value::ToValue;
 
 #[cfg(feature = "derive")]
 pub use rsn_derive::{FromValue, ToValue};
